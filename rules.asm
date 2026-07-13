@@ -89,6 +89,11 @@
     add {v1: i16}, {r2: reg} => 0x06 @ 0x02 @ 0x0 @ r2  @ v1`16  @ 0x0000 ; res <- v1 + {r2}
     add {v1: i16}, {v2: i16} => 0x06 @ 0x03 @ 0x0 @ 0x0 @ v1`16  @ v2`16  ; res <- v1 + v2
 
+    addc {r1: reg}, {r2: reg} => 0x06 @ 0x04 @ r1  @ r2  @ 0x0000 @ 0x0000 ; res <- {r1} + {r2}
+    addc {r1: reg}, {v2: i16} => 0x06 @ 0x05 @ r1  @ 0x0 @ 0x0000 @ v2`16  ; res <- {r1} + v2
+    addc {v1: i16}, {r2: reg} => 0x06 @ 0x06 @ 0x0 @ r2  @ v1`16  @ 0x0000 ; res <- v1 + {r2}
+    addc {v1: i16}, {v2: i16} => 0x06 @ 0x07 @ 0x0 @ 0x0 @ v1`16  @ v2`16  ; res <- v1 + v2
+
     ; Subtract one value from another.
     ; If ALU is in unsigned mode, FLAG_C will show whether a carry occured.
     ; If ALU is in signed mode, FLAG_O will show whether a overflow occured.

@@ -386,7 +386,7 @@ if __name__ == '__main__':
                     if args['v1'][0] == '1': v1 = -(int(''.join(['0' if c == '1' else '1' for c in args['v1']]),2)+1)
                     if args['v2'][0] == '1': v2 = -(int(''.join(['0' if c == '1' else '1' for c in args['v2']]),2)+1)
 
-                out = v1+v2+c
+                out = v1+v2+(c if int(args['_v'],2) >= 0x04 else 0)
                 self.flags['c'] = ((not self.flags['s']) and out >= pow(2,self.ruleset.mem_depth)) or (self.flags['s'] and out >= pow(2,self.ruleset.mem_depth-1))
                 if self.flags['c']: out -= (pow(2,self.ruleset.mem_depth-1) if self.flags['s'] else pow(2,self.ruleset.mem_depth))
                 self.flags['o'] = self.flags['s'] and out < -pow(2,self.ruleset.mem_depth-1)
