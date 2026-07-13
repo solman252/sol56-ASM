@@ -6,7 +6,7 @@ class AssemblyOutputType(Enum):
     BIN = 'Binary'
     HEX = 'Hexadecimal'
 
-PATH = 'C:/Custom PATH Binaries/'
+PATH = ''
 
 def assemble(output_type: AssemblyOutputType = AssemblyOutputType.BIN, assembly: str | None = None, input_file: str | None = None):
     delete_inp = False

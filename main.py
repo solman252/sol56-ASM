@@ -643,7 +643,7 @@ if __name__ == '__main__':
     #endregion Branching Instructions
 
     #region Power Instructions
-    ruleset.add_rule('pwd',{},'0x18 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
+    ruleset.add_rule('pwd',{},'0x1B @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
     #endregion Power Instructions
 
     #region Video Instructions
