@@ -1,10 +1,10 @@
 from typing import Callable
 import re, time, pygame
 
-def bin_to_hex(bin_str: str) -> str: return hex(int(bin_str,2))[2:].zfill(len(bin_str)//4)
+def bin_to_hex(bin_str: str) -> str: return hex(int(bin_str,2))[2:].upper().zfill(len(bin_str)//4)
 def hex_to_bin(hex_str: str) -> str: return bin(int(hex_str,16))[2:].zfill(len(hex_str)*4)
-def int_to_bin(v: int, l: int) -> str: return bin(v)[2:].zfill(l)
-def int_to_hex(v: int, l: int) -> str: return hex(v)[2:].zfill(l)
+def int_to_bin(n: int, bits: int, signed: bool = False) -> str: return format(n % (1 << bits), f'0{bits}b') if signed else bin(n)[2:].zfill(bits)
+def int_to_hex(v: int, bits: int) -> str: return hex(v)[2:].upper().zfill(bits)
 
 class MEM:
     def __init__(self, size: int, initial_data: str | None = None):
@@ -35,12 +35,18 @@ class MEM:
         self.data = '0'*self.size
 
 class Ruleset:
-    def __init__(self, inst_size: int, registers: dict[str,int] | None = None):
-        self.inst_size = inst_size
+    def __init__(self, inst_depth: int, color_depth: int, mem_depth: int, interrupt_depth: int, registers: dict[str,int], flags: list[str], exec_handler: Callable, interrupt_caller: Callable):
+        self.inst_depth = inst_depth
+        self.color_depth = color_depth
+        self.mem_depth = mem_depth
+        self.interrupt_depth = interrupt_depth
         
-        self.registers = {k.strip().lower(): v for k,v in registers.items()} if registers is not None else {}
+        self.registers: dict[str,int] = {k.strip().lower(): v for k,v in registers.items()}
+        self.flags: dict[str] = [flag.strip().lower() for flag in flags]
 
         self.instructions: dict[str,Ruleset.Instruction] = {}
+        self.exec_handler = exec_handler
+        self.interrupt_caller = interrupt_caller
 
     class Instruction:
         def __init__(self, ruleset: 'Ruleset', name: str, args: dict[str,int] | None, opcode: str):
@@ -67,567 +73,585 @@ class Ruleset:
 
             ruleset.instructions[self.match_exp] = self
     
-    def add_rule(self, name: str, args: dict[str,int] | None, opcode: str):
-        Ruleset.Instruction(self,name,args,opcode)
+    def add_rule(self, name: str, args: dict[str,int] | None, opcode: str): Ruleset.Instruction(self,name,args,opcode)
 
 class CPU:
-    def __init__(self, name: str, screen_size: tuple[int,int], screen_fps: int, ruleset: Ruleset, execute_func: Callable, RAM: MEM, flags: list[str] | None = None, debug_mode: bool = False):
+    def __init__(self, name: str, clock_speed: float, ruleset: Ruleset, debug_mode: bool = False):
         self.name = name
-        self.screen_size = screen_size
-        self.screen_fps = screen_fps
+        self.clock_speed = clock_speed
 
         self.ruleset = ruleset
 
-        self.execute_func = execute_func
-
         self.registers: dict[str,MEM] = {reg: MEM(size) for reg,size in self.ruleset.registers.items()}
-        self.flags: dict[str,bool] = {flag.strip().lower():False for flag in flags} if flags is not None else {}
-
-        self.RAM = RAM
+        self.flags: dict[str,bool] = {flag:False for flag in self.ruleset.flags}
+        self.PRAM = MEM(pow(2,self.ruleset.mem_depth)*self.ruleset.inst_depth)
+        self.VRAM = MEM(pow(2,self.ruleset.mem_depth)*3*self.ruleset.color_depth)
+        self.RAM = MEM(pow(2,self.ruleset.mem_depth)*self.ruleset.mem_depth)
+        self.ITABLE = MEM(self.ruleset.interrupt_depth*self.ruleset.mem_depth)
 
         self.PC = 0
+
+        self.halted = False
+        self.handling_interrupt = None
+        self.istate_registers: dict[str,MEM] = {reg: MEM(size) for reg,size in self.ruleset.registers.items()}
+        self.istate_flags: dict[str,MEM] = {reg: MEM(size) for reg,size in self.ruleset.registers.items()}
+        self.istate_PC = 0
 
         self.debug_log: list[str] = []
         self.debug_mode: bool = debug_mode
 
-        self.display = pygame.display.set_mode(screen_size)
-        self.VRAM = pygame.Surface(screen_size,pygame.SRCALPHA)
+        self.display = pygame.display.set_mode([pow(self.ruleset.mem_depth,2)]*2)
         pygame.display.set_caption(name)
         self.pygame_clock = pygame.time.Clock()
 
-        self.asleep = False
-        self.sleep_time = 0
-
-        self.keyboard_queue = []
-
     def reset(self):
-        self.RAM.reset()
         for reg in self.registers.values(): reg.reset()
         for flag in self.flags.keys(): self.flags[flag] = False
+        for reg in self.istate_registers.values(): reg.reset()
+        for flag in self.istate_flags.keys(): self.flags[flag] = False
+        self.VRAM.reset()
+        self.RAM.reset()
+        self.ITABLE.reset()
 
         self.PC = 0
+        self.istate_PC = 0
+
+        self.halted = False
+        self.handling_interrupt = None
+
+        self.debug_log: list[str] = []
+    
+    def interrupt(self, code: int):
+        if code < 0 or code > self.ruleset.interrupt_depth: raise ValueError('Interrupt code must be from 0-256.')
+        if self.debug_mode: print(f'\nINTERRUPT 0x{int_to_hex(code,(self.ruleset.interrupt_depth-1)//4)}')
+        self.istate_PC = self.PC
+        self.PC = int(self.ITABLE.read(self.ruleset.mem_depth*code,self.ruleset.mem_depth),2)
+
+        for k,v in self.registers.items():
+            self.istate_registers[k].write(v.read())
+            v.reset()
+        for k,v in self.flags.items():
+            self.istate_flags[k] = v
+            self.flags[k] = False
+
+        self.handling_interrupt = code
+
+        if self.PC == 0:
+            if self.debug_mode: print('No handler set.')
+            self.interrupt_return()
+            
+        if self.debug_mode: print()
+    
+    def interrupt_return(self):
+        for k,v in self.istate_registers.items(): self.registers[k].write(v.read())
+        for k,v in self.istate_flags.items(): self.flags[k] = v
+        self.PC = self.istate_PC
+        self.istate_PC = 0
+        if self.halted == None or self.halted == self.handling_interrupt: self.halted = False
+        if self.debug_mode: print(f'Jumping back to 0x{int_to_hex(self.PC,self.ruleset.mem_depth//4)} after handling interrupt 0x{int_to_hex(self.handling_interrupt,(self.ruleset.interrupt_depth-1)//4)}.')
+        self.handling_interrupt = None
     
     def clock(self):
-        self.pygame_clock.tick(self.screen_fps)
+        self.ruleset.interrupt_caller(self)
 
-        if self.asleep:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT: exit()
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_F12:
-                    self.asleep = False
-                    result = self.execute_func(self,'0 (Custom)','wake',{'sleeptime':time.time()-self.sleep_time})
-                    self.sleep_time = 0
+        if (self.halted == False) or self.handling_interrupt != None:
 
-            pygame.display.flip()
-            return
+            # Fetch
+            opcode = self.PRAM.read(self.ruleset.inst_depth*self.PC,self.ruleset.inst_depth)
+            
+            # Decode
+            # TODO: match arg to key not to index
+            matches = []
+            for match_exp,inst in self.ruleset.instructions.items():
+                data = re.findall(match_exp,opcode)
+                if data:
+                    args = data[0]
+                    if type(args) == str: args = tuple([args])
+                    args = {key: args[index] for index,key in enumerate(inst.args.keys())}
+                    matches.append((inst.name,args))
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT: exit()
-            if event.type in [pygame.KEYDOWN,pygame.KEYUP]: self.keyboard_queue.append((event.key,event.type))
-
-        # Fetch
-        opcode = self.RAM.read(self.ruleset.inst_size*self.PC,self.ruleset.inst_size)
-        
-        # Decode
-        matches = []
-        for match_exp,inst in self.ruleset.instructions.items():
-            data = re.findall(match_exp,opcode)
-            if data:
-                args = data[0]
-                if type(args) == str: args = tuple([args])
-                args = {key: args[index] for index,key in enumerate(inst.args.keys())}
-                matches.append((inst.name,args))
-
-        # Execute
-        if len(matches) == 0:
-            raise Exception(f'opcode \'{opcode}\' does not match any instruction for the ruleset provided.')
-        if len(matches) > 1:
-            raise Exception(f'opcode \'{opcode}\' matches more than one instruction for the ruleset provided.')
-        self.execute_func(self,opcode,*matches[0])
+            # Execute
+            if len(matches) == 0:
+                raise Exception(f'opcode \'{opcode}\' does not match any instruction for the ruleset provided.')
+            if len(matches) > 1:
+                raise Exception(f'opcode \'{opcode}\' matches more than one instruction for the ruleset provided.')
+            self.ruleset.exec_handler(self,opcode,*matches[0])
         
         pygame.display.flip()
-
-ruleset = Ruleset(56,{'a':16,'b':16,'c':16,'d':16,'res':16,'vid_r':8,'vid_g':8,'vid_b':8,'vid_addr':16})
-
-#region Ruleset Rules
-
-#region Special Instructions
-
-# No operation, does nothing this cycle.
-# nop => 0x00 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('nop',{},'0x00 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# Halt CPU execution until an interrupt signal is received.
-# Argument may be used to differentiate which halt is occuring. Purely for debugging purposes.
-# hlt {r1: reg} => 0x01 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('hlt r1',{'r1':4},'0x01 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# hlt {v1: u16} => 0x01 @ 0x01 @ 0x0 @ 0x0 @ v1`16 @ 0x0000
-ruleset.add_rule('hlt v1',{'v1':16},'0x01 @ 0x01 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-#endregion Special Instructions
-
-#region ALU Operations
-
-# Set signed vs unsigned mode on ALU
-# sign u => 0x02 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 ; ALU uses interprets values as unsigned.
-ruleset.add_rule('sign u',{},'0x02 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-# sign s => 0x02 @ 0x01 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 ; ALU uses interprets values as signed.
-ruleset.add_rule('sign s',{},'0x02 @ 0x01 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# Set carry in for ALU
-# carry 0 => 0x02 @ 0x02 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('carry 0',{},'0x02 @ 0x02 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-# carry 1 => 0x02 @ 0x03 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('carry 1',{},'0x02 @ 0x03 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# Set flags
-# flag z 0 => 0x02 @ 0x04 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('flag z 0',{},'0x02 @ 0x04 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-# flag z 1 => 0x02 @ 0x05 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('flag z 1',{},'0x02 @ 0x05 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# flag n 0 => 0x02 @ 0x06 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('flag n 0',{},'0x02 @ 0x06 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-# flag n 1 => 0x02 @ 0x07 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('flag n 1',{},'0x02 @ 0x07 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# flag o 0 => 0x02 @ 0x08 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('flag o 0',{},'0x02 @ 0x08 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-# flag o 1 => 0x02 @ 0x09 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
-ruleset.add_rule('flag o 1',{},'0x02 @ 0x09 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# For all ALU operations:
-# Result is written to res,
-# FLAG_S will determine if in signed mode or not,
-# FLAG_C acts as carry in,
-# FLAG_Z will show whether the result == 0,
-# FLAG_N will show whether the result is negative (if in signed mode),
-# FLAG_O will show whether an overflow occurred,
-
-# Add 2 values together.
-# If ALU is in unsigned mode, FLAG_C will show whether a carry occured.
-# If ALU is in signed mode, FLAG_O will show whether a overflow occured.
-# add {r1: reg}, {r2: reg} => 0x03 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} + {r2}
-ruleset.add_rule('add r1 r2',{'r1':4,'r2':4},'0x03 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# add {r1: reg}, {v2: u16} => 0x03 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2`16 ; res <- {r1} + v2
-ruleset.add_rule('add r1 v2',{'r1':4,'v2':16},'0x03 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2`16')
-# add {v1: u16}, {r2: reg} => 0x03 @ 0x02 @ 0x0 @ r2`16 @ v1`16 @ 0x0000 ; res <- v1 + {r2}
-ruleset.add_rule('add v1 r2',{'v1':16,'r2':4},'0x03 @ 0x02 @ 0x0 @ r2`16 @ v1`16 @ 0x0000')
-# add {v1: u16}, {v2: u16} => 0x03 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 + v2
-ruleset.add_rule('add v1 v2',{'v1':16,'v2':16},'0x03 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Subtract one value from another.
-# If ALU is in unsigned mode, FLAG_C will show whether a carry occured.
-# If ALU is in signed mode, FLAG_O will show whether a overflow occured.
-# sub {r1: reg}, {r2: reg} => 0x04 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} - {r2}
-ruleset.add_rule('sub r1 r2',{'r1':4,'r2':4},'0x04 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# sub {r1: reg}, {v2: u16} => 0x04 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- {r1} - v2
-ruleset.add_rule('sub r1 v2',{'r1':4,'v2':16},'0x04 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# sub {v1: u16}, {r2: reg} => 0x04 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- v1 - {r2}
-ruleset.add_rule('sub v1 r2',{'v1':16,'r2':4},'0x04 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# sub {v1: u16}, {v2: u16} => 0x04 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 - v2
-ruleset.add_rule('sub v1 v2',{'v1':16,'v2':16},'0x04 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Perform a bitwise and between 2 values.
-# and {r1: reg}, {r2: reg} => 0x05 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} & {r2}
-ruleset.add_rule('and r1 r2',{'r1':4,'r2':4},'0x05 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# and {r1: reg}, {v2: u16} => 0x05 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- {r1} & v2
-ruleset.add_rule('and r1 v2',{'r1':4,'v2':16},'0x05 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# and {v1: u16}, {r2: reg} => 0x05 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- v1 & {r2}
-ruleset.add_rule('and v1 r2',{'v1':16,'r2':4},'0x05 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# and {v1: u16}, {v2: u16} => 0x05 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 & v2
-ruleset.add_rule('and v1 v2',{'v1':16,'v2':16},'0x05 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Perform a bitwise or between 2 values.
-# or {r1: reg}, {r2: reg} => 0x06 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} | {r2}
-ruleset.add_rule('or r1 r2',{'r1':4,'r2':4},'0x06 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# or {r1: reg}, {v2: u16} => 0x06 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- {r1} | v2
-ruleset.add_rule('or r1 v2',{'r1':4,'v2':16},'0x06 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# or {v1: u16}, {r2: reg} => 0x06 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- v1 | {r2}
-ruleset.add_rule('or v1 r2',{'v1':16,'r2':4},'0x06 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# or {v1: u16}, {v2: u16} => 0x06 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 | v2
-ruleset.add_rule('or v1 v2',{'v1':16,'v2':16},'0x06 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Perform a bitwise xor between 2 values.
-# xor {r1: reg}, {r2: reg} => 0x07 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} ^ {r2}
-ruleset.add_rule('xor r1 r2',{'r1':4,'r2':4},'0x07 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# xor {r1: reg}, {v2: u16} => 0x07 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- {r1} ^ v2
-ruleset.add_rule('xor r1 v2',{'r1':4,'v2':16},'0x07 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# xor {v1: u16}, {r2: reg} => 0x07 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- v1 ^ {r2}
-ruleset.add_rule('xor v1 r2',{'v1':16,'r2':4},'0x07 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# xor {v1: u16}, {v2: u16} => 0x07 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 ^ v2
-ruleset.add_rule('xor v1 v2',{'v1':16,'v2':16},'0x07 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Perform a bitwise xnor between values from 2 registers.
-# xnor {r1: reg}, {r2: reg} => 0x08 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- ~({r1} ^ {r2})
-ruleset.add_rule('xnor r1 r2',{'r1':4,'r2':4},'0x08 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# xnor {r1: reg}, {v2: u16} => 0x08 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- ~({r1} ^ v2)
-ruleset.add_rule('xnor r1 v2',{'r1':4,'v2':16},'0x08 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# xnor {v1: u16}, {r2: reg} => 0x08 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- ~(v1 ^ {r2})
-ruleset.add_rule('xnor v1 r2',{'v1':16,'r2':4},'0x08 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# xnor {v1: u16}, {v2: u16} => 0x08 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- ~(v1 ^ v2)
-ruleset.add_rule('xnor v1 v2',{'v1':16,'v2':16},'0x08 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Bit-shift a value by another value to the left.
-# bsl {r1: reg}, {r2: reg} => 0x09 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} << {r2}
-ruleset.add_rule('bsl r1 r2',{'r1':4,'r2':4},'0x09 @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# bsl {r1: reg}, {v2: u16} => 0x09 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- {r1} << v2
-ruleset.add_rule('bsl r1 v2',{'r1':4,'v2':16},'0x09 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# bsl {v1: u16}, {r2: reg} => 0x09 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- v1 << {r2}
-ruleset.add_rule('bsl v1 r2',{'v1':16,'r2':4},'0x09 @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# bsl {v1: u16}, {v2: u16} => 0x09 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 << v2
-ruleset.add_rule('bsl v1 v2',{'v1':16,'v2':16},'0x09 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Bit-shift a value by another value to the right.
-# bsr {r1: reg}, {r2: reg} => 0x0A @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} >> {r2}
-ruleset.add_rule('bsr r1 r2',{'r1':4,'r2':4},'0x0A @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# bsr {r1: reg}, {v2: u16} => 0x0A @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- {r1} >> v2
-ruleset.add_rule('bsr r1 v2',{'r1':4,'v2':16},'0x0A @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# bsr {v1: u16}, {r2: reg} => 0x0A @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- v1 >> {r2}
-ruleset.add_rule('bsr v1 r2',{'v1':16,'r2':4},'0x0A @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# bsr {v1: u16}, {v2: u16} => 0x0A @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 >> v2
-ruleset.add_rule('bsr v1 v2',{'v1':16,'v2':16},'0x0A @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Bit-rotate a value by another value to the left.
-# brl {r1: reg}, {r2: reg} => 0x0B @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} <) {r2}
-ruleset.add_rule('brl r1 r2',{'r1':4,'r2':4},'0x0B @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# brl {r1: reg}, {v2: u16} => 0x0B @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- {r1} <) v2
-ruleset.add_rule('brl r1 v2',{'r1':4,'v2':16},'0x0B @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# brl {v1: u16}, {r2: reg} => 0x0B @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- v1 <) {r2}
-ruleset.add_rule('brl v1 r2',{'v1':16,'r2':4},'0x0B @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# brl {v1: u16}, {v2: u16} => 0x0B @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 <) v2
-ruleset.add_rule('brl v1 v2',{'v1':16,'v2':16},'0x0B @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-# Bit-rotate a value by another value to the right.
-# brr {r1: reg}, {r2: reg} => 0x0C @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; res <- {r1} (> {r2}
-ruleset.add_rule('brr r1 r2',{'r1':4,'r2':4},'0x0C @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# brr {r1: reg}, {v2: u16} => 0x0C @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; res <- {r1} (> v2
-ruleset.add_rule('brr r1 v2',{'r1':4,'v2':16},'0x0C @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# brr {v1: u16}, {r2: reg} => 0x0C @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; res <- v1 (> {r2}
-ruleset.add_rule('brr v1 r2',{'v1':16,'r2':4},'0x0C @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# brr {v1: u16}, {v2: u16} => 0x0C @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; res <- v1 (> v2
-ruleset.add_rule('brr v1 v2',{'v1':16,'v2':16},'0x0C @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-#endregion ALU Operations
-
-#region Register / Memory Management
-
-# Copy the right value into the left register.
-# mov {r1: reg}, {r2: reg} => 0x0D @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; r1 <- {r2}
-ruleset.add_rule('mov r1 r2',{'r1':4,'r2':4},'0x0D @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# mov {r1: reg}, {v2: u16} => 0x0D @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; r1 <- v2
-ruleset.add_rule('mov r1 v2',{'r1':4,'v2':16},'0x0D @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-
-# Copy the value in RAM at the right address into the left register.
-# ldr {r1: reg}, [{r2: reg}] => 0x0E @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; r1 <- RAM[{r2}]
-ruleset.add_rule('ldr r1 r2',{'r1':4,'r2':4},'0x0E @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# ldr {r1: reg}, [{v2: u16}] => 0x0E @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; r1 <- RAM[v2]
-ruleset.add_rule('ldr r1 v2',{'r1':4,'v2':16},'0x0E @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-
-# Store the left value into RAM at the right address.
-# str {r1: reg}, [{r2: reg}] => 0x0F @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000 ; {r1} -> RAM[{r2}]
-ruleset.add_rule('str r1 r2',{'r1':4,'r2':4},'0x0F @ 0x00 @ r1 @ r2 @ 0x0000 @ 0x0000')
-# str {r1: reg}, [{v2: u16}] => 0x0F @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2 ; {r1} -> RAM[v2]
-ruleset.add_rule('str r1 v2',{'r1':4,'v2':16},'0x0F @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2')
-# str {v1: u16}, [{r2: reg}] => 0x0F @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000 ; v1 -> RAM[{r2}]
-ruleset.add_rule('str v1 r2',{'v1':16,'r2':4},'0x0F @ 0x02 @ 0x0 @ r2 @ v1 @ 0x0000')
-# str {v1: u16}, [{v2: u16}] => 0x0F @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16 ; v1 -> RAM[v2]
-ruleset.add_rule('str v1 v2',{'v1':16,'v2':16},'0x0F @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ v2`16')
-
-#endregion Register / Memory Management
-
-#region Screen Instructions
-
-# Write to the framebuffer at address {vid_addr} with color (vid_r,vid_g,vid_b)
-# vwr => 0x10 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 ; Screen.framebuffer[vid_addr] <- (vid_r,vid_g,vid_b)
-ruleset.add_rule('vwr',{},'0x10 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# Clear the framebuffer.
-# vcl => 0x11 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 ; Screen.framebuffer[0:] <- (0,0,0)
-ruleset.add_rule('vcl',{},'0x11 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# Flush framebuffer to the screen.
-# vfl => 0x12 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 ; Screen[0:] <- Screen.framebuffer[0:]
-ruleset.add_rule('vfl',{},'0x12 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-#endregion Screen Instructions
-
-#region Branch Instructions
-
-# jmp {r1: reg} => 0x13 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; PC <- {r1}
-ruleset.add_rule('jmp r1',{'r1': 4},'0x13 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# jmp {v1: u16} => 0x13 @ 0x01 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; PC <- v1
-ruleset.add_rule('jmp v1',{'v1':16},'0x13 @ 0x01 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bif s {r1: reg} => 0x14 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if s: PC <- {r1}
-ruleset.add_rule('bif s r1',{'r1': 4},'0x14 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bif s {v1: u16} => 0x14 @ 0x01 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if s: PC <- v1
-ruleset.add_rule('bif s v1',{'v1':16},'0x14 @ 0x01 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bif c {r1: reg} => 0x14 @ 0x02 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if c: PC <- {r1}
-ruleset.add_rule('bif c r1',{'r1': 4},'0x14 @ 0x02 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bif c {v1: u16} => 0x14 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if c: PC <- v1
-ruleset.add_rule('bif c v1',{'v1':16},'0x14 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bif z {r1: reg} => 0x14 @ 0x04 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if z: PC <- {r1}
-ruleset.add_rule('bif z r1',{'r1': 4},'0x14 @ 0x04 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bif z {v1: u16} => 0x14 @ 0x05 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if z: PC <- v1
-ruleset.add_rule('bif z v1',{'v1':16},'0x14 @ 0x05 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bif n {r1: reg} => 0x14 @ 0x06 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if n: PC <- {r1}
-ruleset.add_rule('bif n r1',{'r1': 4},'0x14 @ 0x06 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bif n {v1: u16} => 0x14 @ 0x07 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if n: PC <- v1
-ruleset.add_rule('bif n v1',{'v1':16},'0x14 @ 0x07 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bif o {r1: reg} => 0x14 @ 0x08 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if o: PC <- {r1}
-ruleset.add_rule('bif o r1',{'r1': 4},'0x14 @ 0x08 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bif o {v1: u16} => 0x14 @ 0x09 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if o: PC <- v1
-ruleset.add_rule('bif o v1',{'v1':16},'0x14 @ 0x09 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-
-# bnot s {r1: reg} => 0x15 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if s: PC <- {r1}
-ruleset.add_rule('bnot s r1',{'r1': 4},'0x15 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bnot s {v1: u16} => 0x15 @ 0x01 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if s: PC <- v1
-ruleset.add_rule('bnot s v1',{'v1':16},'0x15 @ 0x01 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bnot c {r1: reg} => 0x15 @ 0x02 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if c: PC <- {r1}
-ruleset.add_rule('bnot c r1',{'r1': 4},'0x15 @ 0x02 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bnot c {v1: u16} => 0x15 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if c: PC <- v1
-ruleset.add_rule('bnot c v1',{'v1':16},'0x15 @ 0x03 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bnot z {r1: reg} => 0x15 @ 0x04 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if z: PC <- {r1}
-ruleset.add_rule('bnot z r1',{'r1': 4},'0x15 @ 0x04 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bnot z {v1: u16} => 0x15 @ 0x05 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if z: PC <- v1
-ruleset.add_rule('bnot z v1',{'v1':16},'0x15 @ 0x05 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bnot n {r1: reg} => 0x15 @ 0x06 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if n: PC <- {r1}
-ruleset.add_rule('bnot n r1',{'r1': 4},'0x15 @ 0x06 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bnot n {v1: u16} => 0x15 @ 0x07 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if n: PC <- v1
-ruleset.add_rule('bnot n v1',{'v1':16},'0x15 @ 0x07 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-# bnot o {r1: reg} => 0x15 @ 0x08 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; if o: PC <- {r1}
-ruleset.add_rule('bnot o r1',{'r1': 4},'0x15 @ 0x08 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-# bnot o {v1: u16} => 0x15 @ 0x09 @ 0x0 @ 0x0 @ v1`16 @ 0x0000 ; if o: PC <- v1
-ruleset.add_rule('bnot o v1',{'v1':16},'0x15 @ 0x09 @ 0x0 @ 0x0 @ v1`16 @ 0x0000')
-
-#endregion Branch Instructions
-
-#region Keyboard Instructions
-
-# kp {r1: reg} => 0x16 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; r1 <- KEYBOARD_QUEUE.pop()
-ruleset.add_rule('kp',{'r1': 4},'0x16 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-
-# kl {r1: reg} => 0x17 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000 ; r1 <- KEYBOARD_QUEUE.length
-ruleset.add_rule('kl',{'r1': 4},'0x17 @ 0x00 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
-
-# kcl => 0x18 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 ; Clear KEYBOARD_QUEUE.
-ruleset.add_rule('kcl',{},'0x18 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-#endregion Keyboard Instructions
-
-#region Power Instructions
-
-# pwd => 0x19 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 ; Shut off the power.
-ruleset.add_rule('pwd',{},'0x19 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-# slp => 0x1A @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 ; Enter sleep mode.
-ruleset.add_rule('slp',{},'0x1A @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
-
-#endregion Power Instructions
-
-#endregion Ruleset Rules
-
-def cpu_exec(self: CPU, opcode: str, inst: str, args: dict[str,str]):
-    #region Setup
-    reg_keys = {
-        '0001':'a',
-        '0010':'b',
-        '0011':'c',
-        '0100':'d',
-        '0101':'res',
-        '0110':'vid_r',
-        '0111':'vid_g',
-        '1000':'vid_b',
-        '1001':'vid_addr'
-    }
-
-    branched = False
-
-    debug_count = 0
-    def debug(*values, sep=' ', end='\n', indent=True):
-        nonlocal debug_count
-        if self.debug_mode: print(('\n' if indent and debug_count == 0 else '')+('    ' if indent else '')+sep.join([str(v) for v in values]),end=end)
-        self.debug_log.append(sep.join([str(v) for v in values])+end)
-        if indent: debug_count += 1
-
-    debug(f'{str(self.PC).zfill(5)} => 0b{opcode} => {inst} {args} => {{',end='',indent=False)
-
-    def read_reg(key: str): return self.registers[reg_keys[args[key]]].read()
-
-    def get_args() -> list[str]:
-        out = []
-        for k,v in args.items():
-            if k[0] == 'r':
-                out.append(read_reg(k))
-            elif k[0] == 'v':
-                out.append(v)
-        return out
-
-    variant_data = inst.split(' ')[1:]
-    if len(variant_data) == 1: variant_data = variant_data[0]
-
-    highest_val = pow(2,self.registers['res'].size)
-
-    #endregion Setup
-    match(inst.split(' ')[0]):
-        #region Special Instructions
-
-        case 'nop': pass
-
-        case 'hlt':
-            # if variant_data == 'r1':
-            #     val = bin_to_hex(read_reg('r1'))
-            # elif variant_data == 'v1':
-            #     val = bin_to_hex(args['v1'])
-            debug(f'Halting code execution.')
-            # debug(f'Interrupt handler for interrupt code 0x{val}')
-
-        #endregion Special Instructions
-        
-        #region ALU Operations
-
-        case 'sign':
-            val = variant_data == 's'
-            self.flags['s'] = val
-            debug(f'ALU sign mode set to {'' if val else 'un'}signed.')
-
-        case 'carry':
-            val = variant_data == '1'
-            self.flags['c'] = val
-            debug(f'Carry flag set to {int(val)}.')
-
-        case 'flag':
-            val = variant_data[1] == '1'
-            self.flags[variant_data[0]] = val
-            debug(f'{ {'z':'Zero','n':'Negative','o':'Overflow'}[variant_data[0]] } flag set to {int(val)}.')
-
-        case 'add':
-            v1,v2 = get_args()
-            s = int(self.flags['s'])
-            # add stuff for signed mode
-            c = int(self.flags['c'])
-            out = v1+v2+c
-            co = out >= highest_val
-            if co:
-                out -= highest_val
-                self.flags['o' if self.flags['s'] else 'c'] = True
-            self.registers['res'].write(int_to_bin(out,self.registers['res'].size))
-
-            debug(f'{v1} + {v2} + {c} = {out}')
-            if co: debug(('Overflow' if self.flags['s'] else 'Carry')+' has occured.')
-            debug()
-            debug(f'res = {out}')
-            if co:debug(f'flag_{'o' if self.flags['s'] else 'c'} = 1')
-        
-        case 'and':
-            v1,v2 = get_args()
-            out = ''.join([str(int((v1[i] == '1') & (v2[i] == '1'))) for i in range(len(v1))])
-            self.registers['res'].write(out)
-            debug(f'{v1} & {v2} = {out}')
-            debug(f'res = {out}')
-        
-        case 'or':
-            v1,v2 = get_args()
-            out = ''.join([str(int((v1[i] == '1') | (v2[i] == '1'))) for i in range(len(v1))])
-            self.registers['res'].write(out)
-            debug(f'{v1} | {v2} = {out}')
-            debug(f'res = {out}')
-        
-        case 'xor':
-            v1,v2 = get_args()
-            out = ''.join([str(int((v1[i] == '1') ^ (v2[i] == '1'))) for i in range(len(v1))])
-            self.registers['res'].write(out)
-            debug(f'{v1} ^ {v2} = {out}')
-            debug(f'res = {out}')
-        
-        case 'xnor':
-            v1,v2 = get_args()
-            out = ''.join([str(int(not ((v1[i] == '1') ^ (v2[i] == '1')))) for i in range(len(v1))])
-            self.registers['res'].write(out)
-            debug(f'~({v1} ^ {v2}) = {out}')
-            debug(f'res = {out}')
-        
-        case 'bsl':
-            v1,v2 = get_args()
-            v2 = int(v2,2)
-            out = v1[min(v2,len(v1)):].ljust(len(v1),'0')
-            self.registers['res'].write(out)
-            debug(f'{v1} << {v2}) = {out}')
-            debug(f'res = {out}')
-        
-        case 'bsr':
-            v1,v2 = get_args()
-            v2 = int(v2,2)
-            out = v1[:len(v1)-min(v2,len(v1))].rjust(len(v1),'0')
-            self.registers['res'].write(out)
-            debug(f'{v1} >> {v2}) = {out}')
-            debug(f'res = {out}')
-        
-        case 'brl':
-            v1,v2 = get_args()
-            v2 = int(v2,2)
-            out = v1[v2%len(v1):]+v1[:v2%len(v1)]
-            self.registers['res'].write(out)
-            debug(f'{v1} <) {v2}) = {out}')
-            debug(f'res = {out}')
-        
-        case 'brr':
-            v1,v2 = get_args()
-            v2 = int(v2,2)
-            out = v1[len(v1)-(v2%len(v1)):]+v1[:len(v1)-v2%len(v1)]
-            self.registers['res'].write(out)
-            debug(f'{v1} (> {v2}) = {out}')
-            debug(f'res = {out}')
-                
-        #endregion ALU Operations
-
-        #region Register / Memory Management
-
-        case 'mov':
-            r1 = reg_keys[args['r1']]
-            v2 = get_args()[1]
-
-            self.registers[r1].write(v2)
-
-            debug(f'{r1} <- {v2}')
-
-        case 'ldr':
-            r1 = reg_keys[args['r1']]
-            v2 = get_args()[1]
-
-            out = self.RAM.read(self.ruleset.inst_size*(int(v2,2)+1)-self.registers[r1].size,self.registers[r1].size)
-
-            self.registers[r1].write(out)
-
-            debug(f'{r1} <- RAM[{v2}] (0b{out})')
-
-        case 'str':
-            v1,v2 = get_args()
-
-            self.RAM.write(v1,self.ruleset.inst_size*(int(v2,2)+1)-len(v1))
-
-            debug(f'{v1} -> RAM[{v2}]')
-
-        #endregion Register / Memory Management
-
-    if not branched: self.PC += 1
-
-    debug('}',indent=False)
-    
-    if inst == 'pwd': exit()
+        self.pygame_clock.tick(self.clock_speed)
 
 if __name__ == '__main__':
+    def interrupt_caller(self: CPU):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.interrupt(0x01)
+
+            elif event.type == pygame.KEYDOWN:
+                self.interrupt(0x02)
+                self.registers['a'].write(int_to_bin(event.key,self.registers['a'].size))
+
+            elif event.type == pygame.KEYUP:
+                self.interrupt(0x03)
+                self.registers['a'].write(int_to_bin(event.key,self.registers['a'].size))
+
+    def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
+        reg_keys = {
+            '0001':'a',
+            '0010':'b',
+            '0011':'c',
+            '0100':'d',
+            '0101':'res',
+            '0110':'vid_r',
+            '0111':'vid_g',
+            '1000':'vid_b',
+            '1001':'vid_addr',
+        }
+        flag_keys = {
+            '0000':'s',
+            '0001':'c',
+            '0010':'z',
+            '0011':'n',
+            '0100':'o',
+        }
+
+        inc_pc = True
+
+        debug_count = 0
+        def debug(*values, sep=' ', end='\n', indent=True):
+            nonlocal debug_count
+            if self.debug_mode: print(('\n' if indent and debug_count == 0 else '')+('    ' if indent else '')+sep.join([str(v) for v in values]),end=end)
+            self.debug_log.append(sep.join([str(v) for v in values])+end)
+            if indent: debug_count += 1
+        
+        if opcode == hex_to_bin('00021FCE2A8739') and not self.debug_mode:
+            self.debug_mode = True
+            debug('Debug mode enabled.\nYou can disable debug mode by passing in 0x1FCE2A873C to the NOP command.\n',indent=False)
+
+        debug(f'0x{int_to_hex(self.PC,self.ruleset.mem_depth//4)}: {inst} {args} => {{',end='',indent=False)
+
+        orig_args = args.copy()
+        for k,v in args.copy().items():
+            vk = 'v'+k[1:]
+            if k[0] == 'r':
+                if (vk in args and int(args[vk],2) != 0) or int(v,2) == 0: continue
+                args.pop(k)
+                args[vk] = self.registers[reg_keys[v]].read()
+
+        match(inst.split(' ')[0]):
+
+            #region Special Instructions
+            case 'nop':
+                if args: debug(f'Data \'{tuple(args.values())[0]}\' passed in.')
+            
+            case 'itd':
+                v2 = args['v2']
+                if len(v2) == 16: v2 = v2[8:]
+                self.ITABLE.write(args['v1'],self.ruleset.mem_depth*int(v2,2))
+                debug(f'0x{bin_to_hex(args['v1'])} -> ITABLE[0x{bin_to_hex(v2)}]')
+            
+            case 'itr':
+                debug(end='')
+                self.interrupt_return()
+                inc_pc = False
+
+            case 'hlt':
+                code = args.get('v1')
+                if code: self.halted = int(code,2)
+                debug(f'Halting code execution until an interrupt{f' with code 0x{bin_to_hex(code)}' if code else ''} occurs.')
+
+            case 'int':
+                code = args.get('v1')
+                debug(f'Generating interrupt signal with code 0x{bin_to_hex(code)}.')
+                debug('}',indent=False)
+                self.PC += 1
+                self.interrupt(int(code,2))
+                return
+            #endregion Special Instructions
+
+            #region ALU Instructions
+            case 'flag':
+                flag = flag_keys[args['f']]
+                v = args['v'] == '1'
+                self.flags[flag] = v
+                debug(f'Setting flag {flag} to {v}.')
+            
+            case 'add':
+                v1, v2, c = int(args['v1'],2), int(args['v2'],2), int(self.flags['c'])
+                if self.flags['s']: 
+                    if args['v1'][0] == '1': v1 = -(int(''.join(['0' if c == '1' else '1' for c in args['v1']]),2)+1)
+                    if args['v2'][0] == '1': v2 = -(int(''.join(['0' if c == '1' else '1' for c in args['v2']]),2)+1)
+
+                out = v1+v2+c
+                self.flags['c'] = ((not self.flags['s']) and out >= pow(2,self.ruleset.mem_depth)) or (self.flags['s'] and out >= pow(2,self.ruleset.mem_depth-1))
+                if self.flags['c']: out -= (pow(2,self.ruleset.mem_depth-1) if self.flags['s'] else pow(2,self.ruleset.mem_depth))
+                self.flags['o'] = self.flags['s'] and out < -pow(2,self.ruleset.mem_depth-1)
+                if self.flags['o']: out += pow(2,self.ruleset.mem_depth-1)+1
+                self.flags['n'] = out < 0
+                self.flags['z'] = out == 0
+
+                self.registers['res'].write(int_to_bin(out,self.ruleset.mem_depth,self.flags['s']))
+
+                debug(f'In {'' if self.flags['s'] else 'un'}signed mode:')
+                debug(f'{v1} + {v2} + {c} = {out}')
+                debug('New flags: (')
+                for f in 'czno':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+ 
+            case 'sub':
+                v1, v2 = int(args['v1'],2), int(args['v2'],2)
+                if self.flags['s']: 
+                    if args['v1'][0] == '1': v1 = -(int(''.join(['0' if c == '1' else '1' for c in args['v1']]),2)+1)
+                    if args['v2'][0] == '1': v2 = -(int(''.join(['0' if c == '1' else '1' for c in args['v2']]),2)+1)
+
+                out = v1-v2
+                self.flags['c'] = ((not self.flags['s']) and out >= pow(2,self.ruleset.mem_depth)) or (self.flags['s'] and out >= pow(2,self.ruleset.mem_depth-1))
+                if self.flags['c']: out -= (pow(2,self.ruleset.mem_depth-1) if self.flags['s'] else pow(2,self.ruleset.mem_depth))
+                self.flags['o'] = self.flags['s'] and out < -pow(2,self.ruleset.mem_depth-1)
+                if self.flags['o']: out += pow(2,self.ruleset.mem_depth-1)+1
+                self.flags['n'] = out < 0
+                self.flags['z'] = out == 0
+
+                self.registers['res'].write(int_to_bin(out,self.ruleset.mem_depth,self.flags['s']))
+
+                debug(f'In {'' if self.flags['s'] else 'un'}signed mode:')
+                debug(f'{v1} - {v2} = {out}')
+                debug('New flags: (')
+                for f in 'czno':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+ 
+            case 'and':
+                v1, v2 = args['v1'], args['v2']
+                out = ''.join(['1' if (v1[i] == '1') and (v2[i] == '1') else '0' for i in range(len(v1))])
+                self.registers['res'].write(out)
+                debug(f'0b{v1} & 0b{v2} = 0b{out}')
+                self.flags['z'] = int(out,2) == 0
+                self.flags['n'] = self.flags['s'] and -(int(''.join(['0' if c == '1' else '1' for c in out]),2)+1) if out[0] == '1' else int(out,2) < 0
+                debug('New flags: (')
+                for f in 'zn':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+ 
+            case 'or':
+                v1, v2 = args['v1'], args['v2']
+                out = ''.join(['1' if (v1[i] == '1') or (v2[i] == '1') else '0' for i in range(len(v1))])
+                self.registers['res'].write(out)
+                debug(f'0b{v1} | 0b{v2} = 0b{out}')
+                self.flags['z'] = int(out,2) == 0
+                self.flags['n'] = self.flags['s'] and -(int(''.join(['0' if c == '1' else '1' for c in out]),2)+1) if out[0] == '1' else int(out,2) < 0
+                debug('New flags: (')
+                for f in 'zn':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+ 
+            case 'xor':
+                v1, v2 = args['v1'], args['v2']
+                out = ''.join(['1' if (v1[i] == '1') ^ (v2[i] == '1') else '0' for i in range(len(v1))])
+                self.registers['res'].write(out)
+                debug(f'0b{v1} ^ 0b{v2} = 0b{out}')
+                self.flags['z'] = int(out,2) == 0
+                self.flags['n'] = self.flags['s'] and -(int(''.join(['0' if c == '1' else '1' for c in out]),2)+1) if out[0] == '1' else int(out,2) < 0
+                debug('New flags: (')
+                for f in 'zn':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+ 
+            case 'xnor':
+                v1, v2 = args['v1'], args['v2']
+                out = ''.join(['0' if (v1[i] == '1') ^ (v2[i] == '1') else '1' for i in range(len(v1))])
+                self.registers['res'].write(out)
+                debug(f'~(0b{v1} ^ 0b{v2}) = 0b{out}')
+                self.flags['z'] = int(out,2) == 0
+                self.flags['n'] = self.flags['s'] and -(int(''.join(['0' if c == '1' else '1' for c in out]),2)+1) if out[0] == '1' else int(out,2) < 0
+                debug('New flags: (')
+                for f in 'zn':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+ 
+            case 'bsl':
+                v1, v2 = args['v1'], int(args['v2'],2)
+                out = v1[:self.ruleset.mem_depth-min(v2,self.ruleset.mem_depth)].ljust(self.ruleset.mem_depth,'0')
+                self.registers['res'].write(out)
+                debug(f'0b{v1} << {v2} = 0b{out}')
+                self.flags['z'] = int(out,2) == 0
+                self.flags['n'] = self.flags['s'] and -(int(''.join(['0' if c == '1' else '1' for c in out]),2)+1) if out[0] == '1' else int(out,2) < 0
+                debug('New flags: (')
+                for f in 'zn':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+ 
+            case 'bsr':
+                v1, v2 = args['v1'], int(args['v2'],2)
+                out = v1[min(v2,self.ruleset.mem_depth):].zfill(self.ruleset.mem_depth)
+                self.registers['res'].write(out)
+                debug(f'0b{v1} >> {v2} = 0b{out}')
+                self.flags['z'] = int(out,2) == 0
+                self.flags['n'] = self.flags['s'] and -(int(''.join(['0' if c == '1' else '1' for c in out]),2)+1) if out[0] == '1' else int(out,2) < 0
+                debug('New flags: (')
+                for f in 'zn':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+ 
+            case 'brl':
+                v1, v2 = args['v1'], int(args['v2'],2) % self.ruleset.mem_depth
+                out = v1[v2:]+v1[:v2]
+                self.registers['res'].write(out)
+                debug(f'0b{v1} <) {int(args['v2'],2)} = 0b{out}')
+                self.flags['z'] = int(out,2) == 0
+                self.flags['n'] = self.flags['s'] and -(int(''.join(['0' if c == '1' else '1' for c in out]),2)+1) if out[0] == '1' else int(out,2) < 0
+                debug('New flags: (')
+                for f in 'zn':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+
+            case 'brr':
+                v1, v2 = args['v1'], int(args['v2'],2) % self.ruleset.mem_depth
+                out = v1[self.ruleset.mem_depth-v2:]+v1[:self.ruleset.mem_depth-v2]
+                self.registers['res'].write(out)
+                debug(f'0b{v1} (> {int(args['v2'],2)} = 0b{out}')
+                self.flags['z'] = int(out,2) == 0
+                self.flags['n'] = self.flags['s'] and -(int(''.join(['0' if c == '1' else '1' for c in out]),2)+1) if out[0] == '1' else int(out,2) < 0
+                debug('New flags: (')
+                for f in 'zn':
+                    debug(f'  {f} = {self.flags[f]}')
+                debug(')')
+            #endregion ALU Instructions
+
+            #region Register / Memory Management Instructions
+            case 'mov':
+                if args['_v'] == '00000010': v2 = str(int(self.flags[flag_keys[args['f_r1']]])).zfill(self.ruleset.mem_depth)
+                else: v2 = args['v2']
+
+                self.registers[reg_keys[orig_args['f_r1']]].write(v2)
+                debug(f'{reg_keys[orig_args['f_r1']]} <- 0x{bin_to_hex(v2)}')
+
+            case 'ldr':
+                v2 = self.RAM.read(self.ruleset.mem_depth*int(args['v2'],2),self.ruleset.mem_depth)
+                self.registers[reg_keys[orig_args['r1']]].write(v2)
+                debug(f'{reg_keys[orig_args['r1']]} <- 0x{bin_to_hex(v2)}')
+
+            case 'str':
+                v2 = args['v2']
+                self.RAM.write(args['v1'],self.ruleset.mem_depth*int(v2,2))
+                debug(f'0x{bin_to_hex(args['v1'])} -> RAM[0x{bin_to_hex(v2)}]')
+            #endregion Register / Memory Management Instructions
+
+            #region Video Instructions
+            # TODO
+            #endregion Video Instructions
+
+            #region Branching Instructions
+            case 'jmp':
+                v1 = int(args['v1'],2)
+                self.PC = v1
+                inc_pc = False
+                debug(f'Jumping to 0x{int_to_hex(v1,(self.ruleset.mem_depth-1)//4)}.')
+
+            case 'jif':
+                v1 = int(args['v1'],2)
+                f = self.flags[flag_keys[args['f']]]
+                if f:
+                    self.PC = v1
+                    inc_pc = False
+                debug(f'{'J' if f else 'Not j'}umping to 0x{int_to_hex(v1,(self.ruleset.mem_depth-1)//4)}. ({flag_keys[args['f']]} = {f})')
+
+            case 'jnot':
+                v1 = int(args['v1'],2)
+                f = self.flags[flag_keys[args['f']]]
+                if not f:
+                    self.PC = v1
+                    inc_pc = False
+                debug(f'{'Not j' if f else 'J'}umping to 0x{int_to_hex(v1,(self.ruleset.mem_depth-1)//4)}. ({flag_keys[args['f']]} = {f})')
+
+            case 'jeq':
+                r1, r2, addr = reg_keys[orig_args['r1']], reg_keys[orig_args['r2']], int(orig_args['v1'],2)
+                j = self.registers[r1].read() == self.registers[r2].read()
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'=' if j else '!'}= {r2})')
+            
+            case 'jeqz':
+                r1, addr = reg_keys[orig_args['r1']], int(orig_args['v1'],2)
+                j = int(self.registers[r1].read(),2) == 0
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'=' if j else '!'}= 0)')
+
+            case 'jlt':
+                r1, r2, addr = reg_keys[orig_args['r1']], reg_keys[orig_args['r2']], int(orig_args['v1'],2)
+                v1, v2 = self.registers[r1].read(), self.registers[r2].read()
+                v1 = -(int(''.join(['0' if c == '1' else '1' for c in v1]),2)+1) if self.flags['s'] and v1[0] == '1' else int(v1,2)
+                v2 = -(int(''.join(['0' if c == '1' else '1' for c in v2]),2)+1) if self.flags['s'] and v2[0] == '1' else int(v2,2)
+                j = v1 < v2
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'<' if j else '>='} {r2})')
+            
+            case 'jltz':
+                r1, addr = reg_keys[orig_args['r1']], int(orig_args['v1'],2)
+                j = self.flags['s'] and self.registers[r1].read()[0] == '1'
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'<' if j else '>='} 0)')
+
+            case 'jgt':
+                r1, r2, addr = reg_keys[orig_args['r1']], reg_keys[orig_args['r2']], int(orig_args['v1'],2)
+                v1, v2 = self.registers[r1].read(), self.registers[r2].read()
+                v1 = -(int(''.join(['0' if c == '1' else '1' for c in v1]),2)+1) if self.flags['s'] and v1[0] == '1' else int(v1,2)
+                v2 = -(int(''.join(['0' if c == '1' else '1' for c in v2]),2)+1) if self.flags['s'] and v2[0] == '1' else int(v2,2)
+                j = v1 > v2
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'>' if j else '<='} {r2})')
+            
+            case 'jgtz':
+                r1, addr = reg_keys[orig_args['r1']], int(orig_args['v1'],2)
+                v1 = self.registers[r1].read()
+                v1 = -(int(''.join(['0' if c == '1' else '1' for c in v1]),2)+1) if self.flags['s'] and v1[0] == '1' else int(v1,2)
+                j = v1 > 0
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'>' if j else '<='} 0)')
+
+            case 'jle':
+                r1, r2, addr = reg_keys[orig_args['r1']], reg_keys[orig_args['r2']], int(orig_args['v1'],2)
+                v1, v2 = self.registers[r1].read(), self.registers[r2].read()
+                v1 = -(int(''.join(['0' if c == '1' else '1' for c in v1]),2)+1) if self.flags['s'] and v1[0] == '1' else int(v1,2)
+                v2 = -(int(''.join(['0' if c == '1' else '1' for c in v2]),2)+1) if self.flags['s'] and v2[0] == '1' else int(v2,2)
+                j = v1 <= v2
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'<=' if j else '<>'} {r2})')
+            
+            case 'jlez':
+                r1, addr = reg_keys[orig_args['r1']], int(orig_args['v1'],2)
+                v1 = self.registers[r1].read()
+                v1 = -(int(''.join(['0' if c == '1' else '1' for c in v1]),2)+1) if self.flags['s'] and v1[0] == '1' else int(v1,2)
+                j = v1 <= 0
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'<=' if j else '>'} 0)')
+
+            case 'jge':
+                r1, r2, addr = reg_keys[orig_args['r1']], reg_keys[orig_args['r2']], int(orig_args['v1'],2)
+                v1, v2 = self.registers[r1].read(), self.registers[r2].read()
+                v1 = -(int(''.join(['0' if c == '1' else '1' for c in v1]),2)+1) if self.flags['s'] and v1[0] == '1' else int(v1,2)
+                v2 = -(int(''.join(['0' if c == '1' else '1' for c in v2]),2)+1) if self.flags['s'] and v2[0] == '1' else int(v2,2)
+                j = v1 >= v2
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'>=' if j else '<'} {r2})')
+            
+            case 'jgez':
+                r1, addr = reg_keys[orig_args['r1']], int(orig_args['v1'],2)
+                v1 = self.registers[r1].read()
+                v1 = -(int(''.join(['0' if c == '1' else '1' for c in v1]),2)+1) if self.flags['s'] and v1[0] == '1' else int(v1,2)
+                j = v1 >= 0
+                if j:
+                    self.PC = addr
+                    inc_pc = False
+                debug(f'{'J' if j else 'Not j'}umping to 0x{int_to_hex(addr,(self.ruleset.mem_depth-1)//4)}. ({r1} {'>=' if j else '<'} 0)')
+            #endregion Branching Instructions
+
+            #region Power Instructions
+            case 'pwd': debug('Shutting down.')
+            #endregion Power Instructions
+
+        if inc_pc: self.PC += 1
+        debug('}',indent=False)
+        if opcode == hex_to_bin('00021FCE2A873C') and self.debug_mode:
+            debug('\nDebug mode disabled.\nYou can enable debug mode by passing in 0x1FCE2A8739 to the NOP command.\n',indent=False)
+            self.debug_mode = False
+        if inst == 'pwd': exit()
+
     from customasm import *
     program_code = assemble(input_file='program.asm').replace('\n','')
-    cpu = CPU('Sol\'s CPU Emulator',(256,256),60,ruleset,cpu_exec,MEM(56*65536,program_code),['s','c','z','n','o'],True)
+
+    ruleset = Ruleset(56,8,16,256,{'a':16,'b':16,'c':16,'d':16,'res':16,'vid_r':8,'vid_g':8,'vid_b':8,'vid_addr':16},['s','c','z','n','o'],exec_handler,interrupt_caller)
+    #region Ruleset Instruction Defs
+
+    #region Special Instructions
+    ruleset.add_rule('nop',{},'0x00 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
+    ruleset.add_rule('nop r1',{'r1':4},'0x00 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ 0x0000')
+    ruleset.add_rule('nop v1',{'v1':40},'0x00 @ 0x02 @ v1`40')
+
+    ruleset.add_rule('intd',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x01 @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('intr',{},'0x02 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
+
+    ruleset.add_rule('hlt',{'_v':8,'r1':4,'v1':16},'0x03 @ _v @ r1 @ 0x0 @ v1 @ 0x0000')
+
+    ruleset.add_rule('int',{'_v':8,'r1':4,'v1':16},'0x04 @ _v @ r1 @ 0x0 @ v1 @ 0x0000')
+    #endregion Special Instructions
+
+    #region ALU Instructions
+    ruleset.add_rule('flag',{'f':4,'v':1},'0x05 @ f @ 0b000 @ v`1 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
+
+    ruleset.add_rule('add',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x06 @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('sub',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x07 @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('and',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x08 @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('or',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x09 @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('xor',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x0A @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('xnor',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x0B @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('bsl',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x0C @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('bsr',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x0D @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('brl',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x0E @ _v @ r1 @ r2 @ v1 @ v2')
+
+    ruleset.add_rule('brr',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x0F @ _v @ r1 @ r2 @ v1 @ v2')
+    #endregion ALU Instructions
+
+    #region Register / Memory Management Instructions
+    ruleset.add_rule('mov',{'_v':8,'f_r1':4,'r2':4,'v2':16},'0x10 @ _v @ f_r1 @ r2 @ 0x0000 @ v2')
+
+    ruleset.add_rule('ldr',{'_v':8,'r1':4,'r2':4,'v2':16},'0x11 @ _v @ r1 @ r2 @ 0x0000 @ v2')
+
+    ruleset.add_rule('str',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x12 @ _v @ r1 @ r2 @ v1 @ v2')
+    #endregion Register / Memory Management Instructions
+
+    #region Branching Instructions
+    ruleset.add_rule('jmp',{'_v':8,'r1':4,'v1':16},'0x13 @ _v @ r1 @ 0x0 @ v1 @ 0x0000')
+    ruleset.add_rule('jif',{'_v':4,'f':4,'r1':4,'v1':16},'0x14 @ _v @ f @ r1 @ 0x0 @ v1 @ 0x0000')
+    ruleset.add_rule('jnot',{'_v':4,'f':4,'r1':4,'v1':16},'0x15 @ _v @ f @ r1 @ 0x0 @ v1 @ 0x0000')
+    ruleset.add_rule('jeq',{'r1':4,'r2':4,'v1':16},'0x16 @ 0x00 @ r1 @ r2 @ v1 @ 0x0000')
+    ruleset.add_rule('jeqz',{'r1':4,'v1':16},'0x16 @ 0x01 @ r1 @ 0x0 @ v1 @ 0x0000')
+    ruleset.add_rule('jlt',{'r1':4,'r2':4,'v1':16},'0x17 @ 0x00 @ r1 @ r2 @ v1 @ 0x0000')
+    ruleset.add_rule('jltz',{'r1':4,'v1':16},'0x17 @ 0x01 @ r1 @ 0x0 @ v1 @ 0x0000')
+    ruleset.add_rule('jgt',{'r1':4,'r2':4,'v1':16},'0x18 @ 0x00 @ r1 @ r2 @ v1 @ 0x0000')
+    ruleset.add_rule('jgtz',{'r1':4,'v1':16},'0x18 @ 0x01 @ r1 @ 0x0 @ v1 @ 0x0000')
+    ruleset.add_rule('jle',{'r1':4,'r2':4,'v1':16},'0x19 @ 0x00 @ r1 @ r2 @ v1 @ 0x0000')
+    ruleset.add_rule('jlez',{'r1':4,'v1':16},'0x19 @ 0x01 @ r1 @ 0x0 @ v1 @ 0x0000')
+    ruleset.add_rule('jge',{'r1':4,'r2':4,'v1':16},'0x1A @ 0x00 @ r1 @ r2 @ v1 @ 0x0000')
+    ruleset.add_rule('jgez',{'r1':4,'v1':16},'0x1A @ 0x01 @ r1 @ 0x0 @ v1 @ 0x0000')
+    #endregion Branching Instructions
+
+    #region Power Instructions
+    ruleset.add_rule('pwd',{},'0x18 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
+    #endregion Power Instructions
+
+    #region Video Instructions
+    # TODO
+    #endregion Video Instructions
+
+    #endregion Ruleset Instruction Defs
+
+    cpu = CPU('x56 CPU',100,ruleset)
+    cpu.PRAM.write(program_code)
     while True: cpu.clock()
