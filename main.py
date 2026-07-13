@@ -1,5 +1,5 @@
 from typing import Callable
-import re, time, pygame
+import re, pygame
 
 def bin_to_hex(bin_str: str) -> str: return hex(int(bin_str,2))[2:].upper().zfill(len(bin_str)//4)
 def hex_to_bin(hex_str: str) -> str: return bin(int(hex_str,16))[2:].zfill(len(hex_str)*4)
@@ -182,17 +182,122 @@ class CPU:
 
 if __name__ == '__main__':
     def interrupt_caller(self: CPU):
+
+        keycodes = {k: i for i,k in enumerate([
+            pygame.K_a,
+            pygame.K_b,
+            pygame.K_c,
+            pygame.K_d,
+            pygame.K_e,
+            pygame.K_f,
+            pygame.K_g,
+            pygame.K_h,
+            pygame.K_i,
+            pygame.K_j,
+            pygame.K_k,
+            pygame.K_l,
+            pygame.K_m,
+            pygame.K_n,
+            pygame.K_o,
+            pygame.K_p,
+            pygame.K_q,
+            pygame.K_r,
+            pygame.K_s,
+            pygame.K_t,
+            pygame.K_u,
+            pygame.K_v,
+            pygame.K_w,
+            pygame.K_x,
+            pygame.K_y,
+            pygame.K_z,
+            pygame.K_0,
+            pygame.K_1,
+            pygame.K_2,
+            pygame.K_3,
+            pygame.K_4,
+            pygame.K_5,
+            pygame.K_6,
+            pygame.K_7,
+            pygame.K_8,
+            pygame.K_9,
+            pygame.K_KP0,
+            pygame.K_KP1,
+            pygame.K_KP2,
+            pygame.K_KP3,
+            pygame.K_KP4,
+            pygame.K_KP5,
+            pygame.K_KP6,
+            pygame.K_KP7,
+            pygame.K_KP8,
+            pygame.K_KP9,
+            pygame.K_KP_ENTER,
+            pygame.K_KP_PLUS,
+            pygame.K_KP_MINUS,
+            pygame.K_KP_MULTIPLY,
+            pygame.K_KP_DIVIDE,
+            pygame.K_KP_PERIOD,
+            pygame.K_F1,
+            pygame.K_F2,
+            pygame.K_F3,
+            pygame.K_F4,
+            pygame.K_F5,
+            pygame.K_F6,
+            pygame.K_F7,
+            pygame.K_F8,
+            pygame.K_F9,
+            pygame.K_F10,
+            pygame.K_F11,
+            pygame.K_F12,
+            pygame.K_BACKQUOTE,
+            pygame.K_MINUS,
+            pygame.K_EQUALS,
+            pygame.K_LEFTBRACKET,
+            pygame.K_RIGHTBRACKET,
+            pygame.K_BACKSLASH,
+            pygame.K_SEMICOLON,
+            pygame.K_QUOTE,
+            pygame.K_COMMA,
+            pygame.K_PERIOD,
+            pygame.K_SLASH,
+            pygame.K_UP,
+            pygame.K_DOWN,
+            pygame.K_LEFT,
+            pygame.K_RIGHT,
+            pygame.K_LSHIFT,
+            pygame.K_LCTRL,
+            pygame.K_LALT,
+            pygame.K_RSHIFT,
+            pygame.K_RCTRL,
+            pygame.K_RALT,
+            pygame.K_ESCAPE,
+            pygame.K_RETURN,
+            pygame.K_TAB,
+            pygame.K_BACKSPACE,
+            pygame.K_SPACE,
+            pygame.K_CAPSLOCK,
+            pygame.K_NUMLOCK,
+            pygame.K_SCROLLOCK,
+            pygame.K_PRINT,
+            pygame.K_BREAK,
+            pygame.K_INSERT,
+            pygame.K_HOME,
+            pygame.K_PAGEUP,
+            pygame.K_DELETE,
+            pygame.K_END,
+            pygame.K_PAGEDOWN,
+        ])}
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.interrupt(0x01)
 
             elif event.type == pygame.KEYDOWN:
                 self.interrupt(0x02)
-                self.registers['a'].write(int_to_bin(event.key,self.registers['a'].size))
+                self.registers['a'].write(int_to_bin(keycodes[event.key],self.registers['a'].size))
 
             elif event.type == pygame.KEYUP:
                 self.interrupt(0x03)
-                self.registers['a'].write(int_to_bin(event.key,self.registers['a'].size))
+                self.registers['a'].write(int_to_bin(keycodes[event.key],self.registers['a'].size))
 
     def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
         reg_keys = {
@@ -243,13 +348,13 @@ if __name__ == '__main__':
             case 'nop':
                 if args: debug(f'Data \'{tuple(args.values())[0]}\' passed in.')
             
-            case 'itd':
+            case 'intd':
                 v2 = args['v2']
                 if len(v2) == 16: v2 = v2[8:]
                 self.ITABLE.write(args['v1'],self.ruleset.mem_depth*int(v2,2))
                 debug(f'0x{bin_to_hex(args['v1'])} -> ITABLE[0x{bin_to_hex(v2)}]')
             
-            case 'itr':
+            case 'intr':
                 debug(end='')
                 self.interrupt_return()
                 inc_pc = False
