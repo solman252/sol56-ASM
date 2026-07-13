@@ -183,7 +183,7 @@ class CPU:
 if __name__ == '__main__':
     def interrupt_caller(self: CPU):
 
-        keycodes = {k: i for i,k in enumerate([
+        keycodes = {k: i+1 for i,k in enumerate([
             pygame.K_a,
             pygame.K_b,
             pygame.K_c,
@@ -293,11 +293,11 @@ if __name__ == '__main__':
 
             elif event.type == pygame.KEYDOWN:
                 self.interrupt(0x02)
-                self.registers['a'].write(int_to_bin(keycodes[event.key],self.registers['a'].size))
+                self.registers['a'].write(int_to_bin(keycodes.get(event.key,0),self.registers['a'].size))
 
             elif event.type == pygame.KEYUP:
                 self.interrupt(0x03)
-                self.registers['a'].write(int_to_bin(keycodes[event.key],self.registers['a'].size))
+                self.registers['a'].write(int_to_bin(keycodes.get(event.key,0),self.registers['a'].size))
 
     def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
         reg_keys = {
