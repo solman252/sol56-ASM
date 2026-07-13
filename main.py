@@ -382,7 +382,7 @@ if __name__ == '__main__':
             
             case 'add':
                 v1, v2, c = int(args['v1'],2), int(args['v2'],2), int(self.flags['c'])
-                if self.flags['s']: 
+                if self.flags['s']:
                     if args['v1'][0] == '1': v1 = -(int(''.join(['0' if c == '1' else '1' for c in args['v1']]),2)+1)
                     if args['v2'][0] == '1': v2 = -(int(''.join(['0' if c == '1' else '1' for c in args['v2']]),2)+1)
 
@@ -760,3 +760,12 @@ if __name__ == '__main__':
     cpu = CPU('x56 CPU',100,ruleset)
     cpu.PRAM.write(program_code)
     while True: cpu.clock()
+
+
+'''
+TODO:
+
+Video stuff, so thats per pixel setting, blitting, and text mode.
+
+RTC command, yay.
+'''
