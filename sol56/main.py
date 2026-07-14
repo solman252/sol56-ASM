@@ -10,6 +10,7 @@ def video_init(self: CPU):
 def video_handler(self: CPU):
     pygame.display.flip()
     self.pygame_clock.tick(self.clock_speed)
+    print(self.pygame_clock.get_fps())
 
 def interrupt_caller(self: CPU):
 
@@ -511,7 +512,7 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
 
 program_code = assemble(input_file='program.asm').replace('\n','')
 
-ruleset = Ruleset(56,8,16,256,{'a':16,'b':16,'c':16,'d':16,'res':16,'vid_r':8,'vid_g':8,'vid_b':8,'vid_addr':16},['s','c','z','n','o'],video_init,exec_handler,interrupt_caller,video_handler)
+ruleset = Ruleset(56,16,256,{'a':16,'b':16,'c':16,'d':16,'res':16,'vid_r':8,'vid_g':8,'vid_b':8,'vid_addr':16},['s','c','z','n','o'],video_init,exec_handler,interrupt_caller,video_handler)
 #region Ruleset Instruction Defs
 
 #region Special Instructions
@@ -586,10 +587,9 @@ ruleset.add_rule('pwd',{},'0x1B @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
 
 #endregion Ruleset Instruction Defs
 
-cpu = CPU('x56 CPU',100,ruleset)
+cpu = CPU('x56 CPU',float('inf'),ruleset)
 cpu.PRAM.write(program_code)
 while True: cpu.clock()
-
 
 '''
 TODO:

@@ -35,9 +35,8 @@ class MEM:
         self.data = '0'*self.size
 
 class Ruleset:
-    def __init__(self, inst_depth: int, color_depth: int, mem_depth: int, interrupt_depth: int, registers: dict[str,int], flags: list[str], video_init: Callable, exec_handler: Callable, interrupt_caller: Callable, video_handler: Callable):
+    def __init__(self, inst_depth: int, mem_depth: int, interrupt_depth: int, registers: dict[str,int], flags: list[str], video_init: Callable, exec_handler: Callable, interrupt_caller: Callable, video_handler: Callable):
         self.inst_depth = inst_depth
-        self.color_depth = color_depth
         self.mem_depth = mem_depth
         self.interrupt_depth = interrupt_depth
         
@@ -88,7 +87,7 @@ class CPU:
         self.registers: dict[str,MEM] = {reg: MEM(size) for reg,size in self.ruleset.registers.items()}
         self.flags: dict[str,bool] = {flag:False for flag in self.ruleset.flags}
         self.PRAM = MEM(pow(2,self.ruleset.mem_depth)*self.ruleset.inst_depth)
-        self.VRAM = MEM(pow(2,self.ruleset.mem_depth)*3*self.ruleset.color_depth)
+        self.VRAM = MEM(pow(2,self.ruleset.mem_depth)*self.ruleset.mem_depth)
         self.RAM = MEM(pow(2,self.ruleset.mem_depth)*self.ruleset.mem_depth)
         self.ITABLE = MEM(self.ruleset.interrupt_depth*self.ruleset.mem_depth)
 
