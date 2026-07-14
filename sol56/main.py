@@ -224,11 +224,11 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
         case 'intr':
             variant = intr_keys[args['_v']]
 
-            if variant in ['reg all','state']:
+            if variant in ['reg all','state', 'all']:
                 debug('Restoring all registers to pre-interrupt state.')
                 for k,v in self.istate_registers.items(): self.registers[k].write(v.read())
                 
-            if variant in ['flag all','state']:
+            if variant in ['flag all','state', 'all']:
                 debug('Restoring all flags to pre-interrupt state.')
                 for k,v in self.istate_flags.items(): self.flags[k] = v
 
