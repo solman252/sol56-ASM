@@ -1,5 +1,5 @@
 from typing import Callable
-import re, pygame
+import re
 
 def bin_to_hex(bin_str: str) -> str: return hex(int(bin_str,2))[2:].upper().zfill(len(bin_str)//4)
 def hex_to_bin(hex_str: str) -> str: return bin(int(hex_str,16))[2:].zfill(len(hex_str)*4)
@@ -35,7 +35,7 @@ class MEM:
         self.data = '0'*self.size
 
 class Ruleset:
-    def __init__(self, inst_depth: int, color_depth: int, mem_depth: int, interrupt_depth: int, registers: dict[str,int], flags: list[str], exec_handler: Callable, interrupt_caller: Callable):
+    def __init__(self, inst_depth: int, color_depth: int, mem_depth: int, interrupt_depth: int, registers: dict[str,int], flags: list[str], video_init: Callable, exec_handler: Callable, interrupt_caller: Callable, video_handler: Callable):
         self.inst_depth = inst_depth
         self.color_depth = color_depth
         self.mem_depth = mem_depth
@@ -45,8 +45,11 @@ class Ruleset:
         self.flags: dict[str] = [flag.strip().lower() for flag in flags]
 
         self.instructions: dict[str,Ruleset.Instruction] = {}
+
+        self.video_init = video_init
         self.exec_handler = exec_handler
         self.interrupt_caller = interrupt_caller
+        self.video_handler = video_handler
 
     class Instruction:
         def __init__(self, ruleset: 'Ruleset', name: str, args: dict[str,int] | None, opcode: str):
@@ -100,9 +103,7 @@ class CPU:
         self.debug_log: list[str] = []
         self.debug_mode: bool = debug_mode
 
-        self.display = pygame.display.set_mode([pow(self.ruleset.mem_depth,2)]*2)
-        pygame.display.set_caption(name)
-        self.pygame_clock = pygame.time.Clock()
+        self.ruleset.video_init(self)
 
     def reset(self):
         for reg in self.registers.values(): reg.reset()
@@ -120,6 +121,8 @@ class CPU:
         self.handling_interrupt = None
 
         self.debug_log: list[str] = []
+
+        self.ruleset.video_init(self)
     
     def interrupt(self, code: int):
         if code < 0 or code > self.ruleset.interrupt_depth: raise ValueError('Interrupt code must be from 0-256.')
@@ -177,10 +180,20 @@ class CPU:
                 raise Exception(f'opcode \'{opcode}\' matches more than one instruction for the ruleset provided.')
             self.ruleset.exec_handler(self,opcode,*matches[0])
         
+        self.ruleset.video_handler(self)
+
+if __name__ == '__main__':
+    import pygame
+
+    def video_init(self: CPU):
+        self.display = pygame.display.set_mode([pow(self.ruleset.mem_depth,2)]*2)
+        pygame.display.set_caption(self.name)
+        self.pygame_clock = pygame.time.Clock()
+    
+    def video_handler(self: CPU):
         pygame.display.flip()
         self.pygame_clock.tick(self.clock_speed)
 
-if __name__ == '__main__':
     def interrupt_caller(self: CPU):
 
         keycodes = {k: i+1 for i,k in enumerate([
@@ -682,7 +695,7 @@ if __name__ == '__main__':
     from customasm import *
     program_code = assemble(input_file='program.asm').replace('\n','')
 
-    ruleset = Ruleset(56,8,16,256,{'a':16,'b':16,'c':16,'d':16,'res':16,'vid_r':8,'vid_g':8,'vid_b':8,'vid_addr':16},['s','c','z','n','o'],exec_handler,interrupt_caller)
+    ruleset = Ruleset(56,8,16,256,{'a':16,'b':16,'c':16,'d':16,'res':16,'vid_r':8,'vid_g':8,'vid_b':8,'vid_addr':16},['s','c','z','n','o'],video_init,exec_handler,interrupt_caller,video_handler)
     #region Ruleset Instruction Defs
 
     #region Special Instructions
