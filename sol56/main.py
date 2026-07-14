@@ -261,19 +261,18 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
             debug(f'Halting code execution until an interrupt{f' with code 0x{bin_to_hex(code)}' if code else ''} occurs.')
 
         case 'time':   
-            t = time.time()-start_time
+            t = (time.time_ns() // (10 ** 9)) -start_time
             dt = time.localtime(t+start_time)
-            print(dt)
             mode = time_keys[args.get('m','0000')]
             v = 0
             match(mode):
                 case 'uptime': v = round(t-0.5)
                 case 'milli-second of second':
-                    if time.get_clock_info('time').resolution > 0.001:
+                    if time.get_clock_info('perf_counter').resolution > 0.001:
                         self.PC += 1
-                        self.interrupt(0x03)
+                        self.interrupt(0x04)
                         return
-                    v = round(t - round(t-0.5) * 1000)
+                    v = round((t - round(t-0.5)) * 1000)
                 case 'second of minute': v = dt.tm_sec
                 case 'minute of hour': v = dt.tm_min
                 case 'hour of day': v = dt.tm_hour
@@ -282,8 +281,7 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
                 case 'day of the year': v = dt.tm_yday
                 case 'month': v = dt.tm_mon
                 case 'year': v = dt.tm_year
-            print(int_to_bin(v,self.ruleset.mem_depth))
-            self.registers[reg_keys[orig_args['r1']]].write(int_to_bin(v,self.ruleset.mem_depth))
+            # self.registers[reg_keys[orig_args['r1']]].write(int_to_bin(v,self.ruleset.mem_depth))
             debug(f'Current {mode} -> {reg_keys[orig_args['r1']]}')
         #endregion Special Instructions
 
@@ -293,11 +291,11 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
             v = args['v'] == '1'
             if flag == '0101':
                 for flag in self.ruleset.flags: self.flags[flag] = v
-                debug(f'Setting all flags to {v}.')
+                debug(f'Set all flags to {v}.')
             else:
                 flag = flag_keys[flag]
                 self.flags[flag] = v
-                debug(f'Setting flag {flag} to {v}.')
+                debug(f'Set flag {flag} to {v}.')
         
         case 'add':
             v1, v2, c = int(args['v1'],2), int(args['v2'],2), int(self.flags['c'])
@@ -704,4 +702,6 @@ while True: cpu.clock()
 TODO:
 
 Video stuff, so thats per pixel setting, blitting, and text mode.
+
+Fix ms of second time command
 '''
