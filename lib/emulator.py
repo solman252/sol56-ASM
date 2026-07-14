@@ -162,7 +162,6 @@ class CPU:
             opcode = self.PRAM.read(self.ruleset.inst_depth*self.PC,self.ruleset.inst_depth)
             
             # Decode
-            # TODO: match arg to key not to index
             matches = []
             for match_exp,inst in self.ruleset.instructions.items():
                 data = re.findall(match_exp,opcode)
@@ -187,4 +186,6 @@ __all__ = ['bin_to_hex','hex_to_bin','int_to_bin','int_to_hex','MEM','Ruleset','
 TODO:
 
 Queue interrupts.
+
+Match instruction args to their key not to their index
 '''
