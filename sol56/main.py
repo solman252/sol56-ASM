@@ -39,6 +39,16 @@ time_keys = {
     '1001':'year',
 }
 
+intr_keys = {
+    '00000000': 'all',
+    '00010000': 'pc',
+    '00100000': 'reg',
+    '00100001': 'reg all',
+    '00110000': 'flag',
+    '00110001': 'flag all',
+    '01000000': 'state',
+}
+
 keycodes = {k: i+1 for i,k in enumerate([
     pygame.K_a,             # 0x0001
     pygame.K_b,             # 0x0002
@@ -202,15 +212,40 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
             if args: v = tuple(args.values())[0]; debug(f'Data 0b{v} / 0x{bin_to_hex(v)} passed in.')
         
         case 'intd':
-            v2 = args['v2']
-            if len(v2) == 16: v2 = v2[8:]
-            self.ITABLE.write(args['v1'],self.ruleset.mem_depth*int(v2,2))
-            debug(f'0x{bin_to_hex(args['v1'])} -> ITABLE[0x{bin_to_hex(v2)}]')
+            if args['_v'] == '0100':
+                self.ITABLE.clear()
+                debug(f'All interrupt handlers undefined.')
+            else:
+                v2 = args['v2']
+                if len(v2) == 16: v2 = v2[8:]
+                self.ITABLE.write(args['v1'],self.ruleset.mem_depth*int(v2,2))
+                debug(f'Defined interrupt handler 0x{bin_to_hex(v2)} => 0x{bin_to_hex(args['v1'])}')
         
         case 'intr':
-            debug(end='')
-            self.interrupt_return()
-            inc_pc = False
+            variant = intr_keys[args['_v']]
+
+            if variant in ['reg all','state']:
+                debug('Restoring all registers to pre-interrupt state.')
+                for k,v in self.istate_registers.items(): self.registers[k].write(v.read())
+                
+            if variant in ['flag all','state']:
+                debug('Restoring all flags to pre-interrupt state.')
+                for k,v in self.istate_flags.items(): self.flags[k] = v
+
+            if variant == 'reg':
+                r = reg_keys[args['rf']]
+                debug(f'Restoring register {r} to pre-interrupt state.')
+                self.registers[r].write(self.istate_registers[r].read())
+
+            if variant == 'flag':
+                f = flag_keys[args['rf']]
+                debug(f'Restoring flag {f} to pre-interrupt state.')
+                self.flags[f] = self.istate_flags[r]
+
+            if variant in ['all','pc']:
+                debug(end='')
+                self.interrupt_return()
+                inc_pc = False
 
         case 'int':
             code = args.get('v1')
@@ -254,10 +289,15 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
 
         #region ALU Instructions
         case 'flag':
-            flag = flag_keys[args['f']]
+            flag = args['f']
             v = args['v'] == '1'
-            self.flags[flag] = v
-            debug(f'Setting flag {flag} to {v}.')
+            if flag == '0101':
+                for flag in self.ruleset.flags: self.flags[flag] = v
+                debug(f'Setting all flags to {v}.')
+            else:
+                flag = flag_keys[flag]
+                self.flags[flag] = v
+                debug(f'Setting flag {flag} to {v}.')
         
         case 'add':
             v1, v2, c = int(args['v1'],2), int(args['v2'],2), int(self.flags['c'])
@@ -404,16 +444,26 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
 
         #region Register / Memory Management Instructions
         case 'mov':
-            if args['_v'] == '00000010': v2 = str(int(self.flags[flag_keys[args['f_r1']]])).zfill(self.ruleset.mem_depth)
+            if args['_v'] == '00000010': v2 = str(int(self.flags[flag_keys[args['r2']]])).zfill(self.ruleset.mem_depth)
             else: v2 = args['v2']
 
-            self.registers[reg_keys[orig_args['f_r1']]].write(v2)
-            debug(f'{reg_keys[orig_args['f_r1']]} <- 0x{bin_to_hex(v2)}')
+            if orig_args['r1'] == '0000':
+                for r in self.registers.values():
+                    r.write(v2[len(v2)-r.size:])
+                debug(f'Set all registers values to 0x{bin_to_hex(v2)}')
+            else:
+                self.registers[reg_keys[orig_args['r1']]].write(v2)
+                debug(f'{reg_keys[orig_args['r1']]} <- 0x{bin_to_hex(v2)}')
 
         case 'ldr':
             v2 = self.RAM.read(self.ruleset.mem_depth*int(args['v2'],2),self.ruleset.mem_depth)
-            self.registers[reg_keys[orig_args['r1']]].write(v2)
-            debug(f'{reg_keys[orig_args['r1']]} <- 0x{bin_to_hex(v2)}')
+
+            if orig_args['r1'] == '0000':
+                for r in self.registers.keys(): self.registers[r].write(v2)
+                debug(f'Set all registers values to 0x{bin_to_hex(v2)}')
+            else:
+                self.registers[reg_keys[orig_args['r1']]].write(v2)
+                debug(f'{reg_keys[orig_args['r1']]} <- 0x{bin_to_hex(v2)}')
 
         case 'str':
             v2 = args['v2']
@@ -569,7 +619,7 @@ ruleset.add_rule('nop v1',{'v1':40},'0x00 @ 0x02 @ v1`40')
 
 ruleset.add_rule('intd',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x01 @ _v @ r1 @ r2 @ v1 @ v2')
 
-ruleset.add_rule('intr',{},'0x02 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000')
+ruleset.add_rule('intr',{'_v':8,'rf':4},'0x02 @ _v @ rf @ 0x0 @ 0x0000 @ 0x0000')
 
 ruleset.add_rule('int',{'_v':8,'r1':4,'v1':16},'0x03 @ _v @ r1 @ 0x0 @ v1 @ 0x0000')
 
@@ -603,7 +653,7 @@ ruleset.add_rule('brr',{'_v':8,'r1':4,'r2':4,'v1':16,'v2':16},'0x10 @ _v @ r1 @ 
 #endregion ALU Instructions
 
 #region Register / Memory Management Instructions
-ruleset.add_rule('mov',{'_v':8,'f_r1':4,'r2':4,'v2':16},'0x11 @ _v @ f_r1 @ r2 @ 0x0000 @ v2')
+ruleset.add_rule('mov',{'_v':8,'r1':4,'r2':4,'v2':16},'0x11 @ _v @ r1 @ r2 @ 0x0000 @ v2')
 
 ruleset.add_rule('ldr',{'_v':8,'r1':4,'r2':4,'v2':16},'0x12 @ _v @ r1 @ r2 @ 0x0000 @ v2')
 
@@ -654,8 +704,4 @@ while True: cpu.clock()
 TODO:
 
 Video stuff, so thats per pixel setting, blitting, and text mode.
-
-Seperate interrupt clear registers and flags, handling, restore registers and flags, and returning.
-(Add a clear command, can pass in a flag or register, or all flags or all registers or all both)
-(Add a interrupt restore command, can pass in ^)
 '''

@@ -36,6 +36,8 @@
         month => 0x7
         year => 0x8
     }
+
+
 ; }
 
 #ruledef {
@@ -69,11 +71,47 @@
             intd {r1: reg}, [{v2: u8}] =>  0x01 @ 0x01 @ r1  @ 0x0 @ 0x0000 @ 0x00 @ v2`8
             intd {v1: u16}, [{r2: reg}] => 0x01 @ 0x02 @ 0x0 @ r2  @ v1`16  @ 0x0000
             intd {v1: u16}, [{v2: u8}] =>  0x01 @ 0x03 @ 0x0 @ 0x0 @ v1`16  @ 0x00 @ v2`8
+
+            ; Undefine all interrupt handlers.
+            intd clear => 0x01 @ 0x04 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
+
+            ; - Macros - {
+                intd reset => asm { intd clear }
+            ; }
         ; }
 
         ; -- INTR -- {
-            ; Return back from handling an interrupt to main code execution.
+            ; Return back from handling an interrupt to main code execution and restore all registers and flags to their pre-interrupt state.
             intr => 0x02 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
+
+            ; Return back from handling an interrupt to main code execution.
+            intr pc => 0x02 @ 0x10 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
+
+            ; Restore a register to it's pre-interrupt state.
+            intr reg, {r: reg} => 0x20 @ 0x01 @ r @ 0x0 @ 0x0000 @ 0x0000
+
+            ; Restore all registers to their pre-interrupt state.
+            intr reg => 0x02 @ 0x21 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
+
+            ; Restore a flag to it's pre-interrupt state.
+            intr flag, {f: flag} => 0x30 @ 0x01 @ f @ 0x0 @ 0x0000 @ 0x0000
+
+            ; Restore all flags to their pre-interrupt state.
+            intr flag => 0x02 @ 0x31 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
+
+            ; Restore all registers and flags to their pre-interrupt state.
+            intr state => 0x02 @ 0x40 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
+
+            ; - Macros - {
+                intr ret => asm { intr pc }
+                intr return => asm { intr pc }
+
+                intr reg, all => asm { intr reg }
+                intr flag, all => asm { intr flag }
+
+                intr rest => asm { intr state }
+                intr restore => asm { intr state }
+            ; }
         ; }
 
         ; -- INT {
@@ -96,6 +134,18 @@
             time {m: time_modes}, {r1: reg} => 0x05 @ 0x0 @ m @ r1 @ 0x0 @ 0x0000 @ 0x0000
         ;}
 
+        ; - Macros - {
+            clr state => asm {
+                mov all, 0
+                flag all, 0
+            }
+
+            reset => asm {
+                intd clear
+                clr state
+                jmp 0
+            }
+        ; }
     ; }
 
     ; ---- ALU Operations ---- {
@@ -109,7 +159,10 @@
 
         ; -- FLAG -- {
             ; Set the value of a flag
-            flag {f: flag}, {v: u1} => 0x06 @ f @ 0b000 @ v`1 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
+            flag {f: flag}, {v: u1} => 0x06 @ f   @ 0b000 @ v`1 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
+
+            ; Set the value of all flags
+            flag all, {v: u1}       => 0x06 @ 0x5 @ 0b000 @ v`1 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
 
             ; - Macros {
                 sign u => asm { flag f_s, 0 }
@@ -220,15 +273,24 @@
 
         ; -- MOV -- {
             ; Copy the right value into the left register.
-            mov {r1: reg}, {r2: reg} => 0x11 @ 0x00 @ r1  @ r2  @ 0x0000 @ 0x0000
-            mov {r1: reg}, {v2: i16} => 0x11 @ 0x01 @ r1  @ 0x0 @ 0x0000 @ v2`16
-            mov {r1: reg}, {f: flag} => 0x11 @ 0x02 @ f   @ 0x1 @ 0x0000 @ 0x0000
+            mov {r1: reg}, {r2: reg} => 0x11 @ 0x00 @ r1 @ r2  @ 0x0000 @ 0x0000
+            mov {r1: reg}, {v2: i16} => 0x11 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2`16
+            mov {r1: reg}, {f: flag} => 0x11 @ 0x02 @ r1 @ f   @ 0x0000 @ 0x0000
+
+            ; Copy the right value into all registers.
+            mov all, {r2: reg} => 0x11 @ 0x00 @ 0x0 @ r2  @ 0x0000 @ 0x0000
+            mov all, {v2: i16} => 0x11 @ 0x01 @ 0x0 @ 0x0 @ 0x0000 @ v2`16
+            mov all, {f: flag} => 0x11 @ 0x02 @ 0x0 @ f   @ 0x0000 @ 0x0000
         ; }
 
         ; -- LDR -- {
             ; Copy the value in RAM at the right address into the left register.
-            ldr {r1: reg}, [{r2: reg}] => 0x12 @ 0x00 @ r1  @ r2  @ 0x0000 @ 0x0000
-            ldr {r1: reg}, [{v2: u16}] => 0x12 @ 0x01 @ r1  @ 0x0 @ 0x0000 @ v2`16
+            ldr {r1: reg}, [{r2: reg}] => 0x12 @ 0x00 @ r1 @ r2  @ 0x0000 @ 0x0000
+            ldr {r1: reg}, [{v2: u16}] => 0x12 @ 0x01 @ r1 @ 0x0 @ 0x0000 @ v2`16
+
+            ; Copy the value in RAM at the right address into all registers.
+            ldr all, {r2: reg} => 0x12 @ 0x00 @ 0x0 @ r2  @ 0x0000 @ 0x0000
+            ldr all, {v2: i16} => 0x12 @ 0x01 @ 0x0 @ 0x0 @ 0x0000 @ v2`16
 
             ; - Macros - {
                 mov {r1: reg}, [{r2: reg}] => asm { ldr {r1}, [{r2}] }

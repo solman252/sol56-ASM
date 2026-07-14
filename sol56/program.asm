@@ -1,5 +1,7 @@
 #include "rules.asm"
 
+debug enable
+
 intd interrupt_handle_exit, [0x01]
 intd interrupt_handle_keydown, [0x02]
 
@@ -11,6 +13,7 @@ interrupt_handle_exit:
 intr
 
 interrupt_handle_keydown:
+    clr state
     ; ESC -> Shut down {
         mov b, 0x0055
         xor a, b
@@ -18,13 +21,11 @@ interrupt_handle_keydown:
         pwd
     ; }
 
-    ; A -> Debug RTC {
+    ; Space -> Debug RTC {
         mov b, 0x005A
         xor a, b
-        jnot f_z, $+1 + 3 ; skip next 3 instructions
-        debug enable
-        rtc stamp, a
+        jnot f_z, $+1 + 2 ; skip next 2 instructions
+        time uptime, a
         debug a
-        debug disable
     ; }
 intr

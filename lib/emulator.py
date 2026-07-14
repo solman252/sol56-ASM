@@ -4,7 +4,7 @@ import re
 def bin_to_hex(bin_str: str) -> str: return hex(int(bin_str,2))[2:].upper().zfill(len(bin_str)//4)
 def hex_to_bin(hex_str: str) -> str: return bin(int(hex_str,16))[2:].zfill(len(hex_str)*4)
 def int_to_bin(n: int, bits: int, signed: bool = False) -> str: return format(n % (1 << bits), f'0{bits}b') if signed else bin(n)[2:].zfill(bits)
-def int_to_hex(v: int, bits: int) -> str: return hex(v)[2:].upper().zfill(bits)
+def int_to_hex(v: int, bits: int = 1) -> str: return hex(v)[2:].upper().zfill(bits)
 
 class MEM:
     def __init__(self, size: int, initial_data: str | None = None):
@@ -35,13 +35,13 @@ class MEM:
         self.data = '0'*self.size
 
 class Ruleset:
-    def __init__(self, inst_depth: int, mem_depth: int, interrupt_depth: int, registers: dict[str,int], flags: list[str], video_init: Callable, exec_handler: Callable, interrupt_caller: Callable, video_handler: Callable):
+    def __init__(self, inst_depth: int, mem_depth: int, interrupt_codes: int, registers: dict[str,int], flags: list[str], video_init: Callable, exec_handler: Callable, interrupt_caller: Callable, video_handler: Callable):
         self.inst_depth = inst_depth
         self.mem_depth = mem_depth
-        self.interrupt_depth = interrupt_depth
+        self.interrupt_codes = interrupt_codes
         
         self.registers: dict[str,int] = {k.strip().lower(): v for k,v in registers.items()}
-        self.flags: dict[str] = [flag.strip().lower() for flag in flags]
+        self.flags: list[str] = [flag.strip().lower() for flag in flags]
 
         self.instructions: dict[str,Ruleset.Instruction] = {}
 
@@ -89,7 +89,7 @@ class CPU:
         self.PRAM = MEM(pow(2,self.ruleset.mem_depth)*self.ruleset.inst_depth)
         self.VRAM = MEM(pow(2,self.ruleset.mem_depth)*self.ruleset.mem_depth)
         self.RAM = MEM(pow(2,self.ruleset.mem_depth)*self.ruleset.mem_depth)
-        self.ITABLE = MEM(self.ruleset.interrupt_depth*self.ruleset.mem_depth)
+        self.ITABLE = MEM(self.ruleset.interrupt_codes*self.ruleset.mem_depth)
 
         self.PC = 0
 
@@ -124,17 +124,17 @@ class CPU:
         self.ruleset.video_init(self)
     
     def interrupt(self, code: int):
-        if code < 0 or code > self.ruleset.interrupt_depth: raise ValueError('Interrupt code must be from 0-256.')
-        if self.debug_mode: print(f'\nINTERRUPT 0x{int_to_hex(code,(self.ruleset.interrupt_depth-1)//4)}')
+        if code < 0 or code > self.ruleset.interrupt_codes: raise ValueError('Interrupt code must be from 0-256.')
+        if self.debug_mode: print(f'\nINTERRUPT 0x{int_to_hex(code,self.ruleset.interrupt_codes.bit_length()//4)}')
         self.istate_PC = self.PC
         self.PC = int(self.ITABLE.read(self.ruleset.mem_depth*code,self.ruleset.mem_depth),2)
 
         for k,v in self.registers.items():
             self.istate_registers[k].write(v.read())
-            v.reset()
+            # v.reset()
         for k,v in self.flags.items():
             self.istate_flags[k] = v
-            self.flags[k] = False
+            # self.flags[k] = False
 
         self.handling_interrupt = code
 
@@ -143,14 +143,14 @@ class CPU:
             self.interrupt_return()
             
         if self.debug_mode: print()
-    
+
     def interrupt_return(self):
-        for k,v in self.istate_registers.items(): self.registers[k].write(v.read())
-        for k,v in self.istate_flags.items(): self.flags[k] = v
+        # for k,v in self.istate_registers.items(): self.registers[k].write(v.read())
+        # for k,v in self.istate_flags.items(): self.flags[k] = v
         self.PC = self.istate_PC
         self.istate_PC = 0
         if self.halted == None or self.halted == self.handling_interrupt: self.halted = False
-        if self.debug_mode: print(f'Jumping back to 0x{int_to_hex(self.PC,self.ruleset.mem_depth//4)} after handling interrupt 0x{int_to_hex(self.handling_interrupt,(self.ruleset.interrupt_depth-1)//4)}.')
+        if self.debug_mode: print(f'Jumping back to 0x{int_to_hex(self.PC,self.ruleset.mem_depth//4)} after handling interrupt 0x{int_to_hex(self.handling_interrupt,self.ruleset.interrupt_codes.bit_length()//4)}.')
         self.handling_interrupt = None
     
     def clock(self):
