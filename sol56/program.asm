@@ -2,7 +2,6 @@
 
 intd interrupt_handle_exit, [0x01]
 intd interrupt_handle_keydown, [0x02]
-intd interrupt_handle_keyup, [0x03]
 
 hlt 0x01
 pwd
@@ -12,12 +11,20 @@ interrupt_handle_exit:
 intr
 
 interrupt_handle_keydown:
-    mov b, 0x0055
-    xor a, b
-    jnot f_z, $+2 ; skip next instruction
-    pwd
-intr
+    ; ESC -> Shut down {
+        mov b, 0x0055
+        xor a, b
+        jnot f_z, $+1 + 1 ; skip next 1 instructions
+        pwd
+    ; }
 
-interrupt_handle_keyup:
-    debug a
+    ; A -> Debug RTC {
+        mov b, 0x005A
+        xor a, b
+        jnot f_z, $+1 + 3 ; skip next 3 instructions
+        debug enable
+        rtc stamp, a
+        debug a
+        debug disable
+    ; }
 intr
