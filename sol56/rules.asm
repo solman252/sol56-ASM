@@ -1,6 +1,6 @@
 #once
 #bankdef rules { outp = 0 * 0b0
-    #bits 56 ; Intstuction bitcount
+    #bits 56 ; Intstuction bit-length
 }
 
 ; ---- Subrules ---- {
