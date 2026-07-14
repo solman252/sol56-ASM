@@ -2,8 +2,8 @@
 
 debug enable
 
-intd interrupt_handle_exit, [0x01]
-intd interrupt_handle_keydown, [0x02]
+intd interrupt_handle_exit, 0x01
+intd interrupt_handle_keydown, 0x02
 
 hlt 0x01
 pwd

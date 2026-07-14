@@ -67,10 +67,10 @@
 
         ; -- INTD -- {
             ; Define an interrupt handler with the left value being the handler's address and the right value being the interrupt code.
-            intd {r1: reg}, [{r2: reg}] => 0x01 @ 0x00 @ r1  @ r2  @ 0x0000 @ 0x0000
-            intd {r1: reg}, [{v2: u8}] =>  0x01 @ 0x01 @ r1  @ 0x0 @ 0x0000 @ 0x00 @ v2`8
-            intd {v1: u16}, [{r2: reg}] => 0x01 @ 0x02 @ 0x0 @ r2  @ v1`16  @ 0x0000
-            intd {v1: u16}, [{v2: u8}] =>  0x01 @ 0x03 @ 0x0 @ 0x0 @ v1`16  @ 0x00 @ v2`8
+            intd {r1: reg}, {r2: reg} => 0x01 @ 0x00 @ r1  @ r2  @ 0x0000 @ 0x0000
+            intd {r1: reg}, {v2: u8} =>  0x01 @ 0x01 @ r1  @ 0x0 @ 0x0000 @ 0x00 @ v2`8
+            intd {v1: u16}, {r2: reg} => 0x01 @ 0x02 @ 0x0 @ r2  @ v1`16  @ 0x0000
+            intd {v1: u16}, {v2: u8} =>  0x01 @ 0x03 @ 0x0 @ 0x0 @ v1`16  @ 0x00 @ v2`8
 
             ; Undefine all interrupt handlers.
             intd clear => 0x01 @ 0x04 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000
