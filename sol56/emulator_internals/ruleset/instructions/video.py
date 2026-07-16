@@ -1,0 +1,12 @@
+from emulator_internals.helpers import *
+
+instructions = {
+    'vid_mode': ('0x1F @ 0x0 @ 0b000 @ m`1 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000', dummy_func),
+
+    'vid_flush': ('0x20 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000', dummy_func),
+
+    'vid_clear': ('0x21 @ 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000', dummy_func),
+
+    'vid_set r': ('0x22 @ 0x00 @ reg1`4 @ reg2`4 @ c1`4 @ c2`4 @ c3`4 @ 0x0 @ 0x0000', dummy_func),
+    'vid_set c': ('0x22 @ 0x01 @ reg1`4 @ reg2`4 @ c`24 @ 0x00', dummy_func),
+}
