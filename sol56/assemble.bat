@@ -1,0 +1,1 @@
+..\lib\customasm.exe -f binstr -o assembled.bin program.asm
