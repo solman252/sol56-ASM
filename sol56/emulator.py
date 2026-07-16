@@ -1,11 +1,8 @@
 
 import time
-from helpers import *
-# WEB COMMENTED
-# from lib.emulator import *
-from emulator import *
-# WEB COMMENTED
-# from lib.customasm import *
+from emulator_internals.helpers import *
+from lib.emulator import *
+from lib.customasm import *
 
 start_time = time.time()
 
