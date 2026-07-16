@@ -2,10 +2,12 @@ yayayaya
 
 TODO:
 
-Figure out video blitting, and text mode.
+Emulator:
+    Make docs
+    Comment and clean code
 
-Write exec functions for instructions in new format
-
-Make docs for emulator
-
-Make docs for x56
+x56:
+    Figure out video blitting, and text mode.
+    Write exec functions for instructions in new format.
+    Make docs
+    Comment and clean code
