@@ -6,8 +6,6 @@ interrupt_codes = 256
 registers = {'a':16,'b':16,'c':16,'d':16,'res':16,'vid_r':8,'vid_g':8,'vid_b':8,'vid_addr':16}
 flags = ['s','c','z','n','o']
 
-
-
 #region Ruleset Instruction Defs
 
 #region Special Instructions
