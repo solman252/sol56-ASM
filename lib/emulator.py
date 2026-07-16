@@ -51,10 +51,11 @@ class Ruleset:
         self.video_handler = video_handler
 
     class Instruction:
-        def __init__(self, ruleset: 'Ruleset', name: str, args: dict[str,int] | None, opcode: str):
+        def __init__(self, ruleset: 'Ruleset', name: str, opcode: str):
             self.name = name.strip().lower()
-            self.args = {arg.strip().lower(): size for arg,size in args.items()} if args is not None else {}
             
+            args = []
+
             match_exp = []
             for segment in opcode.split('@'):
                 segment = segment.strip()
@@ -66,16 +67,16 @@ class Ruleset:
                 elif '`' in segment:
                     key,size = segment.split('`')
                     match_exp.append(f'([01]{{{size}}})')
-                elif segment in self.args.keys():
-                    match_exp.append(f'([01]{{{self.args[segment]}}})')
+                    args.append(key)
                 else:
                     raise ValueError(f'Unexpected segment \'{segment}\' in opcode.')
             
             self.match_exp = ''.join(match_exp)
+            self.args = tuple(args)
 
             ruleset.instructions[self.match_exp] = self
     
-    def add_rule(self, name: str, args: dict[str,int] | None, opcode: str): Ruleset.Instruction(self,name,args,opcode)
+    def add_rule(self, name: str, opcode: str): Ruleset.Instruction(self,name,opcode)
 
 class CPU:
     def __init__(self, name: str, clock_speed: float, ruleset: Ruleset, debug_mode: bool = False):
@@ -94,7 +95,9 @@ class CPU:
         self.PC = 0
 
         self.halted = False
-        self.handling_interrupt = None
+
+        self.interrupt_queue = []
+
         self.istate_registers: dict[str,MEM] = {reg: MEM(size) for reg,size in self.ruleset.registers.items()}
         self.istate_flags: dict[str,MEM] = {reg: MEM(size) for reg,size in self.ruleset.registers.items()}
         self.istate_PC = 0
@@ -117,46 +120,46 @@ class CPU:
         self.istate_PC = 0
 
         self.halted = False
-        self.handling_interrupt = None
+        self.interrupt_queue = []
 
         self.debug_log: list[str] = []
 
         self.ruleset.video_init(self)
     
+    def interrupt_logic(self):
+        if len(self.interrupt_queue) == 0: return
+        code = self.interrupt_queue[0]
+        addr = int(self.ITABLE.read(self.ruleset.mem_depth*code,self.ruleset.mem_depth),2)
+        if self.debug_mode: print(f'INTERRUPT 0x{int_to_hex(code,self.ruleset.interrupt_codes.bit_length()//4)}',end=' => ')
+        if addr != 0:
+            if self.debug_mode: print(f'Jumping to handler at 0x{int_to_hex(addr,self.ruleset.mem_depth)}')
+            self.istate_PC = self.PC
+            self.PC = addr
+
+            for k,v in self.registers.items(): self.istate_registers[k].write(v.read())
+            for k,v in self.flags.items(): self.istate_flags[k] = v
+        else:
+            if self.debug_mode: print('No handler set.')
+            self.interrupt_queue.pop(0)
+            self.interrupt_logic()
+    
     def interrupt(self, code: int):
         if code < 0 or code > self.ruleset.interrupt_codes: raise ValueError('Interrupt code must be from 0-256.')
-        if self.debug_mode: print(f'\nINTERRUPT 0x{int_to_hex(code,self.ruleset.interrupt_codes.bit_length()//4)}')
-        self.istate_PC = self.PC
-        self.PC = int(self.ITABLE.read(self.ruleset.mem_depth*code,self.ruleset.mem_depth),2)
-
-        for k,v in self.registers.items():
-            self.istate_registers[k].write(v.read())
-            # v.reset()
-        for k,v in self.flags.items():
-            self.istate_flags[k] = v
-            # self.flags[k] = False
-
-        self.handling_interrupt = code
-
-        if self.PC == 0:
-            if self.debug_mode: print('No handler set.')
-            self.interrupt_return()
-            
-        if self.debug_mode: print()
+        self.interrupt_queue.append(code)
 
     def interrupt_return(self):
-        # for k,v in self.istate_registers.items(): self.registers[k].write(v.read())
-        # for k,v in self.istate_flags.items(): self.flags[k] = v
         self.PC = self.istate_PC
         self.istate_PC = 0
-        if self.halted == None or self.halted == self.handling_interrupt: self.halted = False
-        if self.debug_mode: print(f'Jumping back to 0x{int_to_hex(self.PC,self.ruleset.mem_depth//4)} after handling interrupt 0x{int_to_hex(self.handling_interrupt,self.ruleset.interrupt_codes.bit_length()//4)}.')
-        self.handling_interrupt = None
+        if self.halted == None or self.halted == self.interrupt_queue: self.halted = False
+        if self.debug_mode: print(f'Jumping back to 0x{int_to_hex(self.PC,self.ruleset.mem_depth//4)} after handling interrupt 0x{int_to_hex(self.interrupt_queue[0],self.ruleset.interrupt_codes.bit_length()//4)}.')
+        self.interrupt_queue.pop(0)
     
     def clock(self):
         self.ruleset.interrupt_caller(self)
 
-        if (self.halted == False) or self.handling_interrupt != None:
+        self.interrupt_logic()
+
+        if (self.halted == False) or len(self.interrupt_queue) != 0:
 
             # Fetch
             opcode = self.PRAM.read(self.ruleset.inst_depth*self.PC,self.ruleset.inst_depth)
@@ -168,7 +171,7 @@ class CPU:
                 if data:
                     args = data[0]
                     if type(args) == str: args = tuple([args])
-                    args = {key: args[index] for index,key in enumerate(inst.args.keys())}
+                    args = {key: args[index] for index,key in enumerate(inst.args)}
                     matches.append((inst.name,args))
 
             # Execute
@@ -181,11 +184,3 @@ class CPU:
         self.ruleset.video_handler(self)
 
 __all__ = ['bin_to_hex','hex_to_bin','int_to_bin','int_to_hex','MEM','Ruleset','CPU']
-
-'''
-TODO:
-
-Queue interrupts.
-
-Match instruction args to their key not to their index
-'''
