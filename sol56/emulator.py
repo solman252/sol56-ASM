@@ -13,15 +13,3 @@ cpu._debug_indented = False
 cpu.start_time = time.time()
 
 while True: cpu.clock()
-
-'''
-TODO:
-
-Figure out video blitting, and text mode.
-
-Write exec functions for instructions in new format
-
-Make docs for emulator
-
-Make docs for x56
-'''
