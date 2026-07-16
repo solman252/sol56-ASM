@@ -1,6 +1,6 @@
 
 import time
-from emulator_internals.helpers import *
+import emulator_internals as internal
 from lib.emulator import *
 from lib.customasm import *
 
@@ -436,11 +436,11 @@ def exec_handler(self: CPU, opcode: str, inst: str, args: dict[str,str]):
     if inst == 'pwd': exit()
 
 ruleset = Ruleset(
-    56,
-    16,
-    256,
-    ,
-    ,
+    internal.ruleset.inst_depth,
+    internal.ruleset.mem_depth,
+    internal.ruleset.interrupt_codes,
+    internal.ruleset.registers,
+    internal.ruleset.flags,
     video_init,exec_handler,interrupt_caller,video_handler)
 
 #region Run Emulator

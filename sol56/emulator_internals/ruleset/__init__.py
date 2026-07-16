@@ -1,10 +1,31 @@
 from lib.emulator import *
+import emulator_internals as internal
 
 inst_depth = 56
 mem_depth = 16
 interrupt_codes = 256
 registers = {'a':16,'b':16,'c':16,'d':16,'res':16,'vid_r':8,'vid_g':8,'vid_b':8,'vid_addr':16}
 flags = ['s','c','z','n','o']
+
+ruleset = None
+
+def init() -> Ruleset:
+    global ruleset
+    ruleset = Ruleset(
+        inst_depth,
+        mem_depth,
+        interrupt_codes,
+        registers,
+        flags,
+
+        internal.video.init
+        internal.video.handler,
+        internal.interupts.caller,
+        execution_stage,
+    )
+
+def execution_stage(self: cpu, opcode: str, inst: str, args: dict[str,str]):
+    pass
 
 #region Ruleset Instruction Defs
 
