@@ -14,6 +14,7 @@ def exec_mov_lod(self: CPU, variant: str, reg1: str, f_reg2: str, val1: str, loa
         debug(self,f'{'Result register' if reg_key == 'res' else f'Register {reg_key.upper()}'} set to 0x{bin_to_hex(v)}')
 
 def exec_str(self: CPU, variant: str, reg1: str, reg2: str, val1: str, val2: str):
+    val_is_flag = variant[:4] == '0001'
     
 
 # CONTINUE HERE SOL

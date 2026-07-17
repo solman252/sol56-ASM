@@ -44,5 +44,5 @@ INTHANDLERS:
 ;	    .end:
 ;    intr
 
-; Solomon Macbeth is a Professional Hacker, Don't tell anyone!
+; Solomon Macbeth is a Professional Hacker, Don't tell anyone! - Cindy
 ; Thanks Cindy :3
