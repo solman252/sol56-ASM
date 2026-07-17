@@ -15,7 +15,10 @@ def exec_mov_lod(self: CPU, variant: str, reg1: str, f_reg2: str, val1: str, loa
 
 def exec_str(self: CPU, variant: str, reg1: str, reg2: str, val1: str, val2: str):
     val_is_flag = variant[:4] == '0001'
-    
+    val = int_to_bin(int(self.flags[flag_keys[reg1]],2),self.ruleset.mem_depth) if val_is_flag else register_or_val(self, reg1, val1).zfill(self.ruleset.mem_depth)
+    addr = register_or_val(self, reg2, val2).zfill(self.ruleset.mem_depth)
+    self.RAM.write(val,int(addr,2)*self.ruleset.mem_depth,self.ruleset.mem_depth)
+    debug(self,f'0x{bin_to_hex(val)} written to RAM at address 0x{bin_to_hex(addr,)}')
 
 # CONTINUE HERE SOL
 
@@ -26,5 +29,5 @@ instructions = {
     'ldr': ('0x13 @ 0x0 @ variant`4 @ reg1`4 @ f_reg2`4 @ val1`16 @ 0x0000', lambda self, **kwargs: exec_mov_lod(self, **kwargs, load = True)),
     'ldr all': ('0x13 @ 0x1 @ variant`4 @ reg1`4 @ f_reg2`4 @ val1`16 @ 0x0000', lambda self, **kwargs: exec_mov_lod(self, **kwargs, load = True, all = True)),
     
-    'str': ('0x14 @ variant`8 @ reg1`4 @ reg2`4 @ val1`16 @ val2`16', dummy_func),
+    'str': ('0x14 @ variant`8 @ reg1`4 @ reg2`4 @ val1`16 @ val2`16', exec_str),
 }

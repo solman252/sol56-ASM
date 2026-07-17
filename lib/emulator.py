@@ -3,7 +3,7 @@ import re
 
 def bin_to_hex(bin_str: str) -> str: return hex(int(bin_str,2))[2:].upper().zfill(len(bin_str)//4)
 def hex_to_bin(hex_str: str) -> str: return bin(int(hex_str,16))[2:].zfill(len(hex_str)*4)
-def int_to_bin(n: int, bits: int, signed: bool = False) -> str: return bin((n + (1 << bits)) % (1 << bits))[2:].zfill(bits)
+def int_to_bin(n: int, bits: int = 1, signed: bool = False) -> str: return bin((n + (1 << bits)) % (1 << bits))[2:].zfill(bits)
 def int_to_hex(v: int, bits: int = 1) -> str: return hex(v)[2:].upper().zfill(bits)
 
 class MEM:

@@ -1,7 +1,11 @@
 from emulator_internals.helpers import *
 
+def exec_jmp(self: CPU, variant: str, reg1: str, val1: str):
+    addr = register_or_val(self, reg1, val1).zfill(self.ruleset.mem_depth)
+    self.PC = 
+
 instructions = {
-    'jmp': ('0x15 @ variant`8 @ reg1`4 @ 0x0 @ val1`16 @ 0x0000', dummy_func),
+    'jmp': ('0x15 @ variant`8 @ reg1`4 @ 0x0 @ val1`16 @ 0x0000', exec_jmp),
 
     'jif': ('0x16 @ variant`8 @ f`4 @ reg1`4 @ 0x0 @ val1`16 @ 0x0000', dummy_func),
 
