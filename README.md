@@ -12,3 +12,6 @@
     
     * Make docs
     * Comment and clean code
+
+* Setup:
+    * Prepare keys
