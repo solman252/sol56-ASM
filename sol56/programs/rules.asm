@@ -335,14 +335,14 @@
 
         ; -- JIF -- {
             ; Conditionally jump to an address if a flag is set to true.
-            jif {f: flag}, {r1: reg} => 0x16 @ 0x0 @ f`4 @ r1`4 @ 0x0 @ 0x0000 @ 0x0000
-            jif {f: flag}, {v1: u16} => 0x16 @ 0x1 @ f`4 @ 0x0  @ 0x0 @ v1`16  @ 0x0000
+            jif {f: flag}, {r1: reg} => 0x16 @ 0x00 @ f`4 @ r1`4 @ 0x0000 @ 0x0000
+            jif {f: flag}, {v1: u16} => 0x16 @ 0x01 @ f`4 @ 0x0  @ v1`16  @ 0x0000
         ; }
 
         ; -- JNOT -- {
             ; Conditionally jump to an address if a flag is set to false.
-            jnot {f: flag}, {r1: reg} => 0x17 @ 0x0 @ f`4 @ r1`4 @ 0x0  @ 0x0000 @ 0x0000
-            jnot {f: flag}, {v1: u16} => 0x17 @ 0x1 @ f`4 @ 0x0  @ 0x0  @ v1`16  @ 0x0000
+            jnot {f: flag}, {r1: reg} => 0x17 @ 0x00 @ f`4 @ r1`4 @ 0x0000 @ 0x0000
+            jnot {f: flag}, {v1: u16} => 0x17 @ 0x01 @ f`4 @ 0x0  @ v1`16  @ 0x0000
         ; }
 
         ; -- JEQ -- {
