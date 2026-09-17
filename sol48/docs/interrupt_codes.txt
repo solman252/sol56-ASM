@@ -1,0 +1,14 @@
+0x00 => UNASSIGNABLE
+
+Hardware Interrupts:
+    0x01 => Power-down request
+    0x02 => Keydown
+    0x03 => Keyup
+
+Exceptions:
+    0x04 => Division by zero exception
+    0x05 => Unaligned jump address exception
+    0x06 => Invalid opcode exception
+    0x07 => Invalid operand exception
+
+0x08 - 0xFF => UNASSIGNED

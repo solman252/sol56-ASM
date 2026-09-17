@@ -1,4 +1,4 @@
-from emulator_internals.helpers import *
+from sol48.emulator_internals.helpers import *
 
 import pygame
 

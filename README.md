@@ -1,17 +1,7 @@
-***yayayaya!***
+add call and return instructions to isa and emulator
 
-## __TODO:__
+implement write protection
+implement operand enforcement
+enforce all assembler errors
 
-* Emulator:
-    * Make docs
-    * Comment and clean code
-
-* x56:
-    * Figure out video blitting, and text mode.
-    * Write exec functions for instructions in new format.
-    
-    * Make docs
-    * Comment and clean code
-
-* Setup:
-    * Prepare keys
+test all instructions

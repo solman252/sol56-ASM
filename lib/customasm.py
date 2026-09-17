@@ -1,12 +1,17 @@
 import sys, subprocess, os
 from enum import Enum
+from pathlib import Path
+
+basePath = Path(__file__).resolve().parent.parent
+customasmPath = str(basePath / 'lib' / 'customasm.exe')
+buildPath = str(basePath / 'build.customasmbuild')
 
 class AssemblyOutputType(Enum):
     BOTH = 'Binary and Hex'
     BIN = 'Binary'
     HEX = 'Hexadecimal'
 
-def assemble(output_type: AssemblyOutputType = AssemblyOutputType.BIN, assembly: str | None = None, input_file: str | None = None):
+def assemble(output_type: AssemblyOutputType = AssemblyOutputType.BIN, assembly: str | None = None, input_file: str | None = None, min_addr_unit: int = 64):
     delete_inp = False
     if input_file is None:
         if assembly is not None:
@@ -17,30 +22,45 @@ def assemble(output_type: AssemblyOutputType = AssemblyOutputType.BIN, assembly:
             raise ValueError('If an input file is not provided, a string with assembly code must be.')
     elif assembly is not None:
         raise ValueError('If an input file is provided, `assembly` argument must be None.')
+
+    customasmCommand = [
+        customasmPath,
+        '-f', 'binstr',
+        '-o', buildPath,
+        str(Path(input_file).resolve()),
+    ]
     
-    if sys.platform == 'win32':
-        subprocess.run(['customasm.exe', '-f', 'binstr', '-o', 'build.customasmbuild', input_file], check=True, stdout=subprocess.PIPE)
-    else:
-        subprocess.run(['wine', 'customasm.exe', '-f', 'binstr', '-o', 'build.customasmbuild', input_file], check=True, stdout=subprocess.PIPE)
+    if sys.platform != 'win32': customasmCommand.insert(0,'wine')
 
-    if delete_inp:os.remove(input_file)
+    try:
+        subprocess.run(customasmCommand, check=True, stdout=subprocess.PIPE)
+    except:
+        print('\nProgram could not be assembled, see above.')
+        exit(1)
 
-    with open('build.customasmbuild','r') as f: contents = f.read()
-    os.remove('build.customasmbuild')
+    if delete_inp: os.remove(input_file)
 
-    binary_out = '\n'.join(contents[i:i+56] for i in range(0, len(contents), 56))
+    with open(buildPath,'r') as f: contents = f.read()
+    os.remove(buildPath)
+
+    binary_out = '\n'.join(contents[i:i+min_addr_unit] for i in range(0, len(contents), min_addr_unit))
     if output_type == AssemblyOutputType.BIN:
         return binary_out
     
     hex_out = []
     for line in binary_out.splitlines():
-        s = hex(int(line,2)).removeprefix('0x').upper()
-        s = ('0'*(4-len(s))) + s
-
-        hex_out.append(s[0:2]+' '+s[2:4])
+        s = hex(int(line,2)).removeprefix('0x').upper().zfill(min_addr_unit // 4)
+        hex_out.append(' '.join(s[i:i+2] for i in range(0, len(s), 2)))
     hex_out = '\n'.join(hex_out)
 
     if output_type == AssemblyOutputType.BOTH: return (binary_out, hex_out)
     return hex_out
+
+if __name__ == '__main__':
+    import subprocess
+
+    text = assemble(AssemblyOutputType.HEX,None,sys.argv[1],48)
+    
+    subprocess.run(['code','-'],input=text,text=True,shell=True)
 
 __all__ = ['assemble','AssemblyOutputType']

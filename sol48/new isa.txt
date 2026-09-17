@@ -1,0 +1,226 @@
+#once
+#bankdef rules { outp = 0 * 0b0
+    #bits 32 ; Intstuction bit-length
+}
+
+; ---- Subrules ---- {
+
+# subruledef reg {
+    pc => 0x0
+    res => 0x1
+    res2 => 0x2
+    ar => 0x3
+    br => 0x4
+    cr => 0x5
+    dr => 0x6
+    er => 0x7
+    fr => 0x8
+    gr => 0x9
+    hr => 0xa
+}
+
+#subruledef flag {
+    cf => 0xb
+    of => 0xc
+    zf => 0xd
+    rf => 0xe
+    if => 0xf
+}
+
+#ruledef {
+    nop => 0x00 @ 0x0 @ 0x0
+
+
+    set {f: flag} => 0x01 @ f @ 0x0
+    clr {f: flag} => 0x02 @ f @ 0x0
+
+
+    mov {sr: reg}, {dr: reg} => 0x03 @ sr @ dr
+    mov [{sr: reg}], {dr: reg} => 0x04 @ sr @ dr
+    
+    str {sr: reg}, [{dr: reg}] => 0x05 @ sr @ dr
+    str [{sr: reg}], [{dr: reg}] => 0x06 @ sr @ dr
+
+    ldr [{sr: reg}], {dr: reg} => 0x07 @ sr @ dr
+
+    ldi {v: i32}, {r: reg} => 0x08 @ r @ 0x0 @ v`32
+
+
+    inc {r: reg} => 0x09 @ r @ 0x0
+    dec {r: reg} => 0x0a @ r @ 0x0
+    neg {r: reg} => 0x0b @ r @ 0x0
+
+    add {r1: reg}, {r2: reg} => 0x0c @ r1 @ r2
+    add [{r1: reg}], {r2: reg} => 0x0d @ r1 @ r2
+    add {r1: reg}, [{r2: reg}] => 0x0e @ r1 @ r2
+    add [{r1: reg}], [{r2: reg}] => 0x0f @ r1 @ r2
+
+    sub {r1: reg}, {r2: reg} => 0x10 @ r1 @ r2
+    sub [{r1: reg}], {r2: reg} => 0x11 @ r1 @ r2
+    sub {r1: reg}, [{r2: reg}] => 0x12 @ r1 @ r2
+    sub [{r1: reg}], [{r2: reg}] => 0x13 @ r1 @ r2
+
+    mul {r1: reg}, {r2: reg} => 0x14 @ r1 @ r2
+    mul [{r1: reg}], {r2: reg} => 0x15 @ r1 @ r2
+    mul {r1: reg}, [{r2: reg}] => 0x16 @ r1 @ r2
+    mul [{r1: reg}], [{r2: reg}] => 0x17 @ r1 @ r2
+
+    imul {r1: reg}, {r2: reg} => 0x18 @ r1 @ r2
+    imul [{r1: reg}], {r2: reg} => 0x19 @ r1 @ r2
+    imul {r1: reg}, [{r2: reg}] => 0x1a @ r1 @ r2
+    imul [{r1: reg}], [{r2: reg}] => 0x1b @ r1 @ r2
+
+    div {r1: reg}, {r2: reg} => 0x1c @ r1 @ r2
+    div [{r1: reg}], {r2: reg} => 0x1d @ r1 @ r2
+    div {r1: reg}, [{r2: reg}] => 0x1e @ r1 @ r2
+    div [{r1: reg}], [{r2: reg}] => 0x1f @ r1 @ r2
+
+    idiv {r1: reg}, {r2: reg} => 0x20 @ r1 @ r2
+    idiv [{r1: reg}], {r2: reg} => 0x21 @ r1 @ r2
+    idiv {r1: reg}, [{r2: reg}] => 0x22 @ r1 @ r2
+    idiv [{r1: reg}], [{r2: reg}] => 0x23 @ r1 @ r2
+
+
+    and {r1: reg}, {r2: reg} => 0x24 @ r1 @ r2
+    and [{r1: reg}], {r2: reg} => 0x25 @ r1 @ r2
+    and {r1: reg}, [{r2: reg}] => 0x26 @ r1 @ r2
+    and [{r1: reg}], [{r2: reg}] => 0x27 @ r1 @ r2
+
+    or {r1: reg}, {r2: reg} => 0x28 @ r1 @ r2
+    or [{r1: reg}], {r2: reg} => 0x29 @ r1 @ r2
+    or {r1: reg}, [{r2: reg}] => 0x2a @ r1 @ r2
+    or [{r1: reg}], [{r2: reg}] => 0x2b @ r1 @ r2
+
+    xor {r1: reg}, {r2: reg} => 0x2c @ r1 @ r2
+    xor [{r1: reg}], {r2: reg} => 0x2d @ r1 @ r2
+    xor {r1: reg}, [{r2: reg}] => 0x2e @ r1 @ r2
+    xor [{r1: reg}], [{r2: reg}] => 0x2f @ r1 @ r2
+
+    not {r1: reg}, {r2: reg} => 0x30 @ r1 @ r2
+    not [{r1: reg}], {r2: reg} => 0x31 @ r1 @ r2
+    not {r1: reg}, [{r2: reg}] => 0x32 @ r1 @ r2
+    not [{r1: reg}], [{r2: reg}] => 0x33 @ r1 @ r2
+
+    nand {r1: reg}, {r2: reg} => 0x34 @ r1 @ r2
+    nand [{r1: reg}], {r2: reg} => 0x35 @ r1 @ r2
+    nand {r1: reg}, [{r2: reg}] => 0x36 @ r1 @ r2
+    nand [{r1: reg}], [{r2: reg}] => 0x37 @ r1 @ r2
+
+    nor {r1: reg}, {r2: reg} => 0x38 @ r1 @ r2
+    nor [{r1: reg}], {r2: reg} => 0x39 @ r1 @ r2
+    nor {r1: reg}, [{r2: reg}] => 0x3a @ r1 @ r2
+    nor [{r1: reg}], [{r2: reg}] => 0x3b @ r1 @ r2
+
+    xnor {r1: reg}, {r2: reg} => 0x3c @ r1 @ r2
+    xnor [{r1: reg}], {r2: reg} => 0x3d @ r1 @ r2
+    xnor {r1: reg}, [{r2: reg}] => 0x3e @ r1 @ r2
+    xnor [{r1: reg}], [{r2: reg}] => 0x3f @ r1 @ r2
+
+
+    shl {r: reg} => 0x40 @ r @ 0x0
+    shl [{r: reg}] => 0x41 @ r @ 0x0
+
+    shr {r: reg} => 0x42 @ r @ 0x0
+    shr [{r: reg}] => 0x43 @ r @ 0x0
+
+    sal {r: reg} => 0x44 @ r @ 0x0
+    sal [{r: reg}] => 0x45 @ r @ 0x0
+
+    sar {r: reg} => 0x46 @ r @ 0x0
+    sar [{r: reg}] => 0x47 @ r @ 0x0
+
+    rol {r: reg} => 0x48 @ r @ 0x0
+    rol [{r: reg}] => 0x49 @ r @ 0x0
+
+    ror {r: reg} => 0x4a @ r @ 0x0
+    ror [{r: reg}] => 0x4b @ r @ 0x0
+
+    rcl {r: reg} => 0x4c @ r @ 0x0
+    rcl [{r: reg}] => 0x4d @ r @ 0x0
+
+    rcr {r: reg} => 0x4e @ r @ 0x0
+    rcr [{r: reg}] => 0x4f @ r @ 0x0
+
+    ril {r1: reg}, {r2: reg} => 0x50 @ r1 @ r2
+    ril [{1r: reg}], {r2: reg} => 0x51 @ r1 @ r2
+    ril {r1: reg}, [{r2: reg}] => 0x52 @ r1 @ r2
+    ril [{1r: reg}], [{r2: reg}] => 0x53 @ r1 @ r2
+
+    rir {r1: reg}, {r2: reg} => 0x54 @ r1 @ r2
+    rir [{1r: reg}], {r2: reg} => 0x55 @ r1 @ r2
+    rir {r1: reg}, [{r2: reg}] => 0x56 @ r1 @ r2
+    rir [{r1: reg}], [{r2: reg}] => 0x57 @ r1 @ r2
+
+
+    intd {cr: reg}, {ar: reg} => 0x58 @ cr @ ar
+    intd [{cr: reg}], {ar: reg} => 0x59 @ cr @ ar
+    intd {cr: reg}, [{ar: reg}] => 0x5a @ cr @ ar
+    intd [{cr: reg}], [{ar: reg}] => 0x5b @ cr @ ar
+
+    int {r: reg} => 0x5c @ r @ 0x0
+    int [{r: reg}] => 0x5d @ r @ 0x0
+
+    iret => 0x5e @ 0x0 @ 0x0
+
+    hlt => 0x5f @ 0x0 @ 0x0
+    hlt {r: reg} => 0x60 @ r @ 0x0
+    hlt [{r: reg}] => 0x61 @ r @ 0x0
+
+
+    jmp {r: reg} => 0x62 @ r @ 0x0
+    jmp [{r: reg}] => 0x63 @ r @ 0x0
+
+    jif {f: flag}, {r: reg} => 0x64 @ f @ r
+    jif {f: flag}, [{r: reg}] => 0x65 @ f @ r
+
+    jnot {f: flag}, {r: reg} => 0x66 @ f @ r
+    jnot {f: flag}, [{r: reg}] => 0x67 @ f @ r
+
+    jeq {r1: reg}, {r2: reg} => 0x68 @ r1 @ r2
+    jeq [{r1: reg}], {r2: reg} => 0x69 @ r1 @ r2
+    jeq {r1: reg}, [{r2: reg}] => 0x6a @ r1 @ r2
+    jeq [{r1: reg}], [{r2: reg}] => 0x6b @ r1 @ r2
+
+    jeqz {r: reg} => 0x6c @ r @ 0x0
+    jeqz [{r: reg}] => 0x6d @ r @ 0x0
+
+    jne {r1: reg}, {r2: reg} => 0x6e @ r1 @ r2
+    jne [{r1: reg}], {r2: reg} => 0x6f @ r1 @ r2
+    jne {r1: reg}, [{r2: reg}] => 0x70 @ r1 @ r2
+    jne [{r1: reg}], [{r2: reg}] => 0x71 @ r1 @ r2
+
+    jnez {r: reg} => 0x72 @ r @ 0x0
+    jnez [{r: reg}] => 0x73 @ r @ 0x0
+
+    jlt {r1: reg}, {r2: reg} => 0x74 @ r1 @ r2
+    jlt [{r1: reg}], {r2: reg} => 0x75 @ r1 @ r2
+    jlt {r1: reg}, [{r2: reg}] => 0x76 @ r1 @ r2
+    jlt [{r1: reg}], [{r2: reg}] => 0x77 @ r1 @ r2
+
+    jltz {r: reg} => 0x78 @ r @ 0x0
+    jnez [{r: reg}] => 0x79 @ r @ 0x0
+
+    jgt {r1: reg}, {r2: reg} => 0x7a @ r1 @ r2
+    jgt [{r1: reg}], {r2: reg} => 0x7b @ r1 @ r2
+    jgt {r1: reg}, [{r2: reg}] => 0x7c @ r1 @ r2
+    jgt [{r1: reg}], [{r2: reg}] => 0x7d @ r1 @ r2
+
+    jgtz {r: reg} => 0x7e @ r @ 0x0
+    jgtz [{r: reg}] => 0x7f @ r @ 0x0
+
+    jle {r1: reg}, {r2: reg} => 0x80 @ r1 @ r2
+    jle [{r1: reg}], {r2: reg} => 0x81 @ r1 @ r2
+    jle {r1: reg}, [{r2: reg}] => 0x82 @ r1 @ r2
+    jle [{r1: reg}], [{r2: reg}] => 0x83 @ r1 @ r2
+
+    jlez {r: reg} => 0x84 @ r @ 0x0
+    jlez [{r: reg}] => 0x85 @ r @ 0x0
+
+    jge {r1: reg}, {r2: reg} => 0x86 @ r1 @ r2
+    jge [{r1: reg}], {r2: reg} => 0x87 @ r1 @ r2
+    jge {r1: reg}, [{r2: reg}] => 0x88 @ r1 @ r2
+    jge [{r1: reg}], [{r2: reg}] => 0x89 @ r1 @ r2
+
+    jgez {r: reg} => 0x8a @ r @ 0x0
+    jgez [{r: reg}] => 0x8b @ r @ 0x0
+}
