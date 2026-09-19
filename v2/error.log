@@ -1,0 +1,15 @@
+error: multiple matches with the same encoding size
+ --> C:\Users\Solomon\Desktop\Files\Coding\CPU\Emulator\v2\programs\input.customasmbuild:4:1:
+2 | #include "rules/sol48.asm" 
+3 |  
+4 | nop
+  | ^^^ 
+  + note: match on `#anonymous_ruledef_0`, rule 0:
+  --> C:/Users/Solomon/Desktop/Files/Coding/CPU/Emulator/v2/programs/rules/sol48.asm:2:5:
+ 2 |     nop => 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 
+   |     ^^^                                        
+
+  + note: match on `#anonymous_ruledef_1`, rule 0:
+  --> C:/Users/Solomon/Desktop/Files/Coding/CPU/Emulator/v2/programs/rules/sol48.asm:2:5:
+ 2 |     nop => 0x00 @ 0x0 @ 0x0 @ 0x0000 @ 0x0000 
+   |     ^^^                                        

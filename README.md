@@ -1,7 +1,1 @@
-add call and return instructions to isa and emulator
-
-implement write protection
-implement operand enforcement
-enforce all assembler errors
-
-test all instructions
+YAY

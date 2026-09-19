@@ -29,11 +29,9 @@ def exception_handler(self: CPU, exception: str, **kwargs):
         case _: raise NotImplementedError
 
 def on_enter(self: CPU, code: int):
-    self.registers['iflags'].write(''.join(str(int(self.flags[f])) for f in self.ruleset.flags).ljust(self.registers['iflags'].size,'0'))
+    save_flags(self)
 
-def on_exit(self: CPU, code: int, reset_flags: bool):
-    if reset_flags:
-        iflags = self.registers['iflags'].read()
-        for i,f in enumerate(self.ruleset.flags): self.flags[f] = iflags[i] == '1'
+def on_exit(self: CPU, code: int, restore_flags: bool):
+    if restore_flags: restore_saved_flags(self)
 
 __all__ = ['caller','exception_handler','on_enter','on_exit']

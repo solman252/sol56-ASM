@@ -181,6 +181,9 @@
     ; ---- Special Instructions (0x0_) ---- {
         nop => _op_parse_args(0x00, _NONE, _NONE, 0, 0) ; Does nothing this cycle
         time {arg1: _ARG}, {arg2: _ARG} => _op_parse_args(0x01, _TIME_ASPECT, _WRITEABLE, arg1, arg2) ; Copy an aspect of the time to another spot
+        call {arg1: _ARG} => _op_parse_args(0x02, _READABLE, _NONE, arg1, 0) ; Call the procedure at the provided address
+        res => _op_parse_args(0x03, _NONE, _NONE, 0, 0) ; Return from a procedure and restore flags
+        ret => _op_parse_args(0x04, _NONE, _NONE, 0, 0) ; Return from a procedure
     ; }
 
     ; ---- Data Management (0x1_) ---- {

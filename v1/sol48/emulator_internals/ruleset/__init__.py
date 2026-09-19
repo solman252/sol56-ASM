@@ -52,6 +52,7 @@ def setup(self: CPU):
     self._debug_indented = False
     self._debug_whitelist = [True]*0xFF
     self.start_time = 0
+    self.cstate_PC = 0
 
 def execution_stage(self: CPU, inst_binary: str, inst: str, args: dict[str,str]):
     opcode = int(inst_binary[:8],2)

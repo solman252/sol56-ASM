@@ -132,6 +132,7 @@ class CPU:
 
         self.debug_log: list[str] = []
 
+        self.ruleset.cpu_setup(self)
         self.ruleset.video_init(self)
     
     def interrupt_logic(self):

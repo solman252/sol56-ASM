@@ -142,7 +142,7 @@ def display_flags(self: CPU, opcode: int, carry: bool = False, overflow: bool = 
 def conditional_jump(self: CPU, opcode: int, arg_type: str, arg: str, condition: str, condition_met: bool):
     arg = parse_arg(self,arg_type,arg)
     if int(arg,2) % self.ruleset.inst_depth != 0:
-        debug(self,0x24,'Raising unaligned jump address exception.')
+        debug(self,opcode,'Raising unaligned jump address exception.')
         self.interrupt(0x05)
         self.registers['a'].write(int_to_bin(self.PC,self.registers['a'].size))
         return
@@ -185,3 +185,10 @@ def write_res(self: CPU, out: str, arg_type: str, arg: str):
 def display_res(self: CPU, opcode: int, out: str, arg_type: str, arg: str):
     debug(self,opcode,f'{value_display(out,signed=True)} written to the result register.')
     if ARGTYPE(int(arg_type,2)) == ARGTYPE.REG and self.flags['r']: debug(self,opcode,f'{value_display(out,signed=True)} written to register {REG(int(arg,2)).name.upper()}.')
+
+def save_flags(self: CPU):
+    self.registers['iflags'].write(''.join(str(int(self.flags[f])) for f in self.ruleset.flags).ljust(self.registers['iflags'].size,'0'))
+
+def restore_saved_flags(self: CPU):
+    iflags = self.registers['iflags'].read()
+    for i,f in enumerate(self.ruleset.flags): self.flags[f] = iflags[i] == '1'
