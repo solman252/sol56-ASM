@@ -37,7 +37,7 @@
 
     mov {sr: reg}, {dr: reg} => 0x03 @ sr @ dr
     mov [{sr: reg}], {dr: reg} => 0x04 @ sr @ dr
-    
+
     str {sr: reg}, [{dr: reg}] => 0x05 @ sr @ dr
     str [{sr: reg}], [{dr: reg}] => 0x06 @ sr @ dr
 

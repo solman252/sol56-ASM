@@ -16,29 +16,29 @@ class MEM:
         self.initial_data = initial_data
         self.data = initial_data
         self.size = size
-    
+
     def read(self, index: int = 0, size: int | None = None):
         if size is None: size = self.size - index
         if index < 0 or index >= self.size:
             try: self.ruleset.exception_handler(self,'Memory Read Invalid Start Index',mem=self,index=index,size=size)
             except NotImplementedError: raise IndexError('data start index out of range')
-        if index + size > self.size: 
+        if index + size > self.size:
             try: self.ruleset.exception_handler(self,'Memory Read Invalid End Index',mem=self,index=index,size=size)
             except NotImplementedError: raise IndexError('data end index out of range')
         return ''.join(self.data[index:index+size])
-    
+
     def write(self, data: str, index: int = 0):
-        if index < 0 or index >= self.size: 
+        if index < 0 or index >= self.size:
             try: self.ruleset.exception_handler(self,'Memory Write Invalid Start Index',mem=self,index=index,data=data)
             except NotImplementedError: raise IndexError('data start index out of range')
-        if index + len(data) > self.size: 
+        if index + len(data) > self.size:
             try: self.ruleset.exception_handler(self,'Memory Write Invalid End Index',mem=self,index=index,data=data)
             except NotImplementedError: raise IndexError('data end index out of range')
         self.data = self.data[:index] + data + self.data[index+len(data):]
-    
+
     def reset(self):
         self.data = self.initial_data
-    
+
     def clear(self):
         self.data = '0'*self.size
 
@@ -47,7 +47,7 @@ class Ruleset:
         self.inst_depth = inst_depth
         self.mem_depth = mem_depth
         self.interrupt_codes = interrupt_codes
-        
+
         self.registers: dict[str,int] = {k.strip().lower(): v for k,v in registers.items()}
         self.flags: list[str] = [flag.strip().lower() for flag in flags]
 
@@ -66,7 +66,7 @@ class Ruleset:
     class Instruction:
         def __init__(self, ruleset: 'Ruleset', name: str, inst_binary: str):
             self.name = name.strip().lower()
-            
+
             args = []
 
             match_exp = []
@@ -83,12 +83,12 @@ class Ruleset:
                     args.append(key)
                 else:
                     raise ValueError(f'Unexpected segment \'{segment}\' in instruction binary.')
-            
+
             self.match_exp = ''.join(match_exp)
             self.args = tuple(args)
 
             ruleset.instructions[self.match_exp] = self
-    
+
     def add_rule(self, name: str, inst_binary: str): Ruleset.Instruction(self,name,inst_binary)
 
 class CPU:
@@ -134,7 +134,7 @@ class CPU:
 
         self.ruleset.cpu_setup(self)
         self.ruleset.video_init(self)
-    
+
     def interrupt_logic(self):
         if len(self.interrupt_queue) == 0 or self.handling_interrupt: return
         self.handling_interrupt = True
@@ -155,7 +155,7 @@ class CPU:
             self.interrupt_queue.pop(0)
             self.handling_interrupt = False
             self.interrupt_logic()
-    
+
     def interrupt(self, code: int):
         if code < 0 or code > self.ruleset.interrupt_codes:
             try: self.ruleset.exception_handler(self,'Invalid Interrupt Code',code=code)
@@ -170,7 +170,7 @@ class CPU:
         if self.debug_mode: print(f'    Jumping back to 0x{int_to_hex(self.PC,self.ruleset.mem_depth)} after handling interrupt 0x{int_to_hex(code,self.ruleset.interrupt_codes.bit_length())}.')
         self.handling_interrupt = False
         self.ruleset.on_interrupt_exit(self,code,*args,**kwargs)
-    
+
     def clock(self):
         self.ruleset.interrupt_caller(self)
 
@@ -181,7 +181,7 @@ class CPU:
             # Fetch
             # inst_binary = self.PRAM.read(self.ruleset.inst_depth*self.PC,self.ruleset.inst_depth)
             inst_binary = self.RAM.read(self.ruleset.mem_depth*self.PC,self.ruleset.mem_depth*self.ruleset.inst_depth)
-            
+
             # Decode
             matches = []
             for match_exp,inst in self.ruleset.instructions.items():
@@ -195,14 +195,14 @@ class CPU:
             # Execute
             if len(matches) == 0:
                 try: self.ruleset.exception_handler(self,'No Instruction Matches',inst_binary=inst_binary)
-                except NotImplementedError: raise Exception(f'Instruction binary 0b{inst_binary} does not match any instruction for the ruleset provided.')  
+                except NotImplementedError: raise Exception(f'Instruction binary 0b{inst_binary} does not match any instruction for the ruleset provided.')
                 matches.append((None,dict()))
             elif len(matches) > 1:
                 try: self.ruleset.exception_handler(self,'Multiple Instruction Matches',inst_binary=inst_binary)
                 except NotImplementedError: raise Exception(f'Instruction binary 0b{inst_binary} matches more than one instruction for the ruleset provided.')
 
             self.ruleset.exec_handler(self,inst_binary,*matches[0])
-        
+
         self.ruleset.video_handler(self)
 
 __all__ = ['MEM','Ruleset','CPU']

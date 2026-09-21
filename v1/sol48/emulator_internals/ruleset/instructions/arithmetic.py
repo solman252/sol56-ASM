@@ -73,7 +73,7 @@ def exec_0x24(self: CPU, arg1_type: str, arg2_type: str, arg1: str, arg2: str):
         self.interrupt(0x04)
         self.registers['a'].write(int_to_bin(self.PC,self.registers['a'].size))
         return
-    
+
     res = v1 // v2
     out = int_to_bin(res,self.registers['res'].size)
 
@@ -93,7 +93,7 @@ def exec_0x25(self: CPU, arg1_type: str, arg2_type: str, arg1: str, arg2: str):
         self.interrupt(0x04)
         self.registers['a'].write(int_to_bin(self.PC,self.registers['a'].size))
         return
-    
+
     res = int(v1 / v2)
     out = signed_to_bin(res)
 

@@ -29,7 +29,7 @@ def assemble(output_type: AssemblyOutputType = AssemblyOutputType.BIN, assembly:
         '-o', buildPath,
         str(Path(input_file).resolve()),
     ]
-    
+
     if sys.platform != 'win32': customasmCommand.insert(0,'wine')
 
     try:
@@ -46,7 +46,7 @@ def assemble(output_type: AssemblyOutputType = AssemblyOutputType.BIN, assembly:
     binary_out = '\n'.join(contents[i:i+min_addr_unit] for i in range(0, len(contents), min_addr_unit))
     if output_type == AssemblyOutputType.BIN:
         return binary_out
-    
+
     hex_out = []
     for line in binary_out.splitlines():
         s = hex(int(line,2)).removeprefix('0x').upper().zfill(min_addr_unit // 4)
@@ -60,7 +60,7 @@ if __name__ == '__main__':
     import subprocess
 
     text = assemble(AssemblyOutputType.HEX,None,sys.argv[1],48)
-    
+
     subprocess.run(['code','-'],input=text,text=True,shell=True)
 
 __all__ = ['assemble','AssemblyOutputType']

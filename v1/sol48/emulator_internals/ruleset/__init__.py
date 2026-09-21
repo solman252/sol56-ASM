@@ -45,7 +45,7 @@ def init(debug_mode: bool = False):
             ruleset.execution_funcs[opcode] = func
 
     if debug_mode: print('Init complete.\n')
-    
+
     return ruleset
 
 def setup(self: CPU):
@@ -63,7 +63,7 @@ def execution_stage(self: CPU, inst_binary: str, inst: str, args: dict[str,str])
             f'0x{int_to_hex(self.PC,self.ruleset.mem_depth)}: ', # Address
             f'{inst}({f'{arg1_type.name}: 0x{bin_to_hex(args['arg1'])}' if arg1_type != ARGTYPE.NONE else ''}{f', {arg2_type.name}: 0x{bin_to_hex(args['arg2'])}' if arg2_type != ARGTYPE.NONE else ''}) => {{' # instruction and arguments
         ,sep='',end='',indent=False)
-        
+
         out: None | dict[str,Any] = self.ruleset.execution_funcs[inst](self,**args)
     else: out = {'Debug Closing': False}
     if type(out) != dict: out = {}
@@ -72,5 +72,5 @@ def execution_stage(self: CPU, inst_binary: str, inst: str, args: dict[str,str])
 
     if out.get('INC PC',True) is True: self.PC = (self.PC + self.ruleset.inst_depth) % (0xFFFF+1)
     self.registers['pc'].write(int_to_bin(self.PC,self.registers['pc'].size))
-    
+
     if out.get('Exit',False) is True: exit()

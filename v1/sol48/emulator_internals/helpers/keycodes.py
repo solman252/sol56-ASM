@@ -19,7 +19,7 @@ keycodes = {k: i+1 for i,k in enumerate([
     pygame.K_p,             # 0x0010
     pygame.K_q,             # 0x0011
     pygame.K_r,             # 0x0012
-    pygame.K_s,             # 0x0013 
+    pygame.K_s,             # 0x0013
     pygame.K_t,             # 0x0014
     pygame.K_u,             # 0x0015
     pygame.K_v,             # 0x0016

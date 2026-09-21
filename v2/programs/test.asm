@@ -1,3 +1,3 @@
-#include "rules/sol48.asm"
+#include "rulesets/sol48/rules.asm"
 
 nop

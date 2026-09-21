@@ -1,0 +1,19 @@
+Comment and clean code
+
+Create ruleset and emulation structure
+
+Rework main entrypoint to allow for:
+    Generating ruleset files,
+
+    Assembling programs
+        Viewing assembled bytecode
+        Running assembled programs
+            Viewing memory
+            Viewing register + flag states
+            Viewing the console
+            Viewing the screen (if applicable)
+
+Remove debug main arguments:
+    -d = True -> -d = False
+    -p = test.asm -> None
+    -p required = False -> True

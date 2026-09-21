@@ -1,5 +1,5 @@
 from sys import path, argv; path.append('..'); cwd = path[0]; del path
-from sol48.emulator_internals.helpers import * 
+from sol48.emulator_internals.helpers import *
 from lib.customasm import *
 
 debug_mode = False
